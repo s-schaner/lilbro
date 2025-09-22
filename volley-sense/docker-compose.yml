@@ -6,6 +6,9 @@ services:
       dockerfile: docker/api.Dockerfile
     ports:
       - '8000:8000'
+    environment:
+      - MODULES_SCREENSNAP_INSIGHTS=true
+      - MODULES_LLM_INSIGHTS=true
   web:
     build:
       context: .

@@ -1,0 +1,12 @@
+{
+  "id": "core-video",
+  "name": "Core Video Pipeline",
+  "version": "0.1.0",
+  "optional": false,
+  "enabled_by_default": true,
+  "backend": {
+    "router": "app.routers.video",
+    "env": ["FFMPEG_BIN"]
+  },
+  "health": {"endpoint": "/video/health", "interval_sec": 15}
+}

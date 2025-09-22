@@ -1,7 +1,7 @@
-import { render } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import RightPanel from './RightPanel';
-import { EventMarker, Player } from '@lib/types';
+import { EventMarker, ModuleStatus, Player } from '@lib/types';
 
 const players: Player[] = [
   {
@@ -21,9 +21,43 @@ const events: EventMarker[] = [
   { t: 37, label: 'Spike Kill', kind: 'kill', jersey: 14, conf: 0.88 }
 ];
 
+const modules: ModuleStatus[] = [
+  { id: 'stats', name: 'Stats', version: '0.1.0', optional: false, enabled: true, status: 'healthy', failure_count: 0 },
+  { id: 'timeline', name: 'Timeline', version: '0.1.0', optional: false, enabled: true, status: 'healthy', failure_count: 0 },
+  { id: 'overlays', name: 'Overlays', version: '0.1.0', optional: true, enabled: true, status: 'healthy', failure_count: 0 },
+  {
+    id: 'llm-insights',
+    name: 'Insights',
+    version: '0.1.0',
+    optional: true,
+    enabled: true,
+    status: 'healthy',
+    failure_count: 0
+  },
+  {
+    id: 'screensnap-insights',
+    name: 'ScreenSnap',
+    version: '0.1.0',
+    optional: true,
+    enabled: true,
+    status: 'healthy',
+    failure_count: 0
+  }
+];
+
 describe('RightPanel', () => {
-  it('matches snapshot', () => {
-    const { container } = render(<RightPanel players={players} events={events} onSeek={() => undefined} />);
-    expect(container).toMatchSnapshot();
+  it('renders player and event data', () => {
+    render(
+      <RightPanel
+        players={players}
+        events={events}
+        modules={modules}
+        imageAnalyses={[]}
+        onSeek={() => undefined}
+      />
+    );
+    expect(screen.getByText('A. Ramos')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Events' }));
+    expect(screen.getByText('Spike Kill')).toBeInTheDocument();
   });
 });

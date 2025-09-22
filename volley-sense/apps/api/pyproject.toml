@@ -11,6 +11,8 @@ dependencies = [
   "fastapi>=0.104",
   "uvicorn[standard]>=0.23",
   "pydantic<2.0",
+  "httpx>=0.25",
+  "python-multipart>=0.0.7",
 ]
 
 [project.optional-dependencies]

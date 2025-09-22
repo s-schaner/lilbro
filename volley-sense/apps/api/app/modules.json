@@ -1,0 +1,9 @@
+{
+  "event-trainer": true,
+  "exports": true,
+  "llm-insights": true,
+  "overlays": true,
+  "screensnap-insights": true,
+  "stats": true,
+  "timeline": true
+}

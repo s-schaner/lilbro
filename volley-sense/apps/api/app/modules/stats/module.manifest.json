@@ -1,0 +1,11 @@
+{
+  "id": "stats",
+  "name": "Player Statistics",
+  "version": "0.1.0",
+  "optional": true,
+  "enabled_by_default": true,
+  "backend": {
+    "router": "app.routers.stats"
+  },
+  "health": {"endpoint": "/stats/health", "interval_sec": 30}
+}

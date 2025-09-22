@@ -5,11 +5,21 @@ import random
 import textwrap
 import zipfile
 from datetime import UTC, datetime
-from typing import Iterable
+from typing import Any, Iterable, Optional
 
 from fastapi.responses import StreamingResponse
 
-from ..models.schemas import Event, EventDefinition, PlayerStat, TrainerExplain
+from ..models.schemas import (
+    BallTrailPoint,
+    Event,
+    EventDefinition,
+    InsightPayload,
+    OverlayBox,
+    OverlayPayload,
+    PlayerStat,
+    ScreenSnapResult,
+    TrainerExplain,
+)
 
 
 SEED_PLAYERS = [
@@ -151,3 +161,69 @@ def build_highlights_zip() -> StreamingResponse:
     stream.seek(0)
     headers = {"Content-Disposition": "attachment; filename=highlights.zip"}
     return StreamingResponse(stream, media_type="application/zip", headers=headers)
+
+
+def generate_insights(game_id: str) -> InsightPayload:
+    recap = (
+        "Team A surged in Set 2 behind #12’s 3 service aces while Team B fought back late with strong defense."
+    )
+    momentum = [
+        "Team A surged in Set 2 behind #12’s 3 service aces.",
+        "#7’s defense (7 digs) kept rallies alive in the final set.",
+        "Illegal formation flagged at 104s cost Team B a key point.",
+    ]
+    spotlights = [
+        "#12 Lin owned the service line with a +6 run in the second frame.",
+        "#7 Ramos turned defense into transition with quick bump sets.",
+    ]
+    coach_notes = [
+        "Lean into the float serve at Zone 1; it created two passing shanks in a row.",
+        "Tighten rotations after timeouts—ensure middle blockers reset to base before whistle.",
+    ]
+    return InsightPayload(
+        game_id=game_id,
+        recap=recap,
+        momentum=momentum,
+        spotlights=spotlights,
+        coach_notes=coach_notes,
+    )
+
+
+def analyze_screenshot(
+    focus: str, context: Optional[dict[str, Any]] = None, system_prompt: Optional[str] = None
+) -> ScreenSnapResult:
+    _ = context, system_prompt  # placeholder for future logic
+    return ScreenSnapResult(
+        focus=focus,
+        summary="#14’s hands are late closing at the antenna",
+        observations=[
+            "Right foot staggered behind the attack line",
+            "Hands track below the tape at contact",
+        ],
+        corrections=[
+            "Start shuffle earlier to seal the line",
+            "Press thumbs over the tape to remove seams",
+        ],
+        confidence=0.73,
+    )
+
+
+def generate_overlay(game_id: str, t: float) -> OverlayPayload:
+    rng = seeded_random(f"{game_id}-{int(t)}")
+    boxes = [
+        OverlayBox(
+            jersey=player.jersey,
+            label=player.name,
+            x=round(rng.uniform(0.15, 0.75), 2),
+            y=round(rng.uniform(0.15, 0.8), 2),
+            width=round(rng.uniform(0.08, 0.12), 2),
+            height=round(rng.uniform(0.16, 0.22), 2),
+            color="#34d399" if idx % 2 == 0 else "#f97316",
+        )
+        for idx, player in enumerate(SEED_PLAYERS)
+    ]
+    trail = [
+        BallTrailPoint(x=round(0.1 + 0.1 * idx, 2), y=round(0.15 + 0.07 * idx, 2), t=round(t - idx * 0.2, 2))
+        for idx in range(5)
+    ]
+    return OverlayPayload(boxes=boxes, trail=trail)

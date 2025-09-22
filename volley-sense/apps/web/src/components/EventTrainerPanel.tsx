@@ -35,7 +35,7 @@ const EventTrainerPanel: FC<Props> = ({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-lg font-semibold text-white">Event Trainer</h2>
-          <p className="text-xs text-slate-400">Configure detections & confidence thresholds</p>
+          <p className="text-xs text-slate-400">Configure detections, confidence thresholds, and shadow mode rules.</p>
         </div>
         <button
           type="button"
@@ -55,6 +55,7 @@ const EventTrainerPanel: FC<Props> = ({
               <div>
                 <p className="text-sm font-semibold text-white">{event.name}</p>
                 <p className="text-xs text-slate-400">Template: {event.template}</p>
+                <p className="text-[11px] text-slate-500">Shadow mode keeps detections silent until confidence stabilizes.</p>
               </div>
               <Switch
                 checked={event.enabled}

@@ -21,3 +21,8 @@ async def export_players(game_id: str = Query("demo-1")) -> Response:
 @router.get("/highlights.zip")
 async def export_highlights() -> Response:
     return build_highlights_zip()
+
+
+@router.get("/health")
+async def health() -> dict[str, bool]:
+    return {"ok": True}

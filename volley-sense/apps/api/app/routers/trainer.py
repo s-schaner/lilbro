@@ -3,8 +3,8 @@ from typing import Optional
 
 from fastapi import APIRouter, Query
 
-from ..models.schemas import Event, EventDefinition
-from ..services.mock_data import DEFAULT_DEFINITIONS, generate_preview
+from ..models.schemas import Event, EventDefinition, TrainerExplain
+from ..services.mock_data import DEFAULT_DEFINITIONS, explain_event, generate_preview
 
 router = APIRouter(prefix="/trainer", tags=["trainer"])
 
@@ -33,3 +33,13 @@ async def save_definition(definition: EventDefinition) -> EventDefinition:
 @router.get("/preview", response_model=list[Event])
 async def preview(eventId: str = Query(...), game_id: str = Query("demo-1")) -> list[Event]:
     return generate_preview(eventId, game_id)
+
+
+@router.get("/health")
+async def health() -> dict[str, bool]:
+    return {"ok": True}
+
+
+@router.get("/explain", response_model=TrainerExplain)
+async def explain(event_id: str = Query(...)) -> TrainerExplain:
+    return explain_event(event_id)

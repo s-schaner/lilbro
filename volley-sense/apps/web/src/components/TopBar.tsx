@@ -11,24 +11,24 @@ type Props = {
   activeMatch: string;
   onMatchChange: (value: string) => void;
   onUpload?: () => void;
+  onSettings?: () => void;
+  onHelp?: () => void;
 };
 
-const TopBar: FC<Props> = ({ activeMatch, onMatchChange, onUpload }) => {
+const TopBar: FC<Props> = ({ activeMatch, onMatchChange, onUpload, onSettings, onHelp }) => {
   return (
     <header className="flex items-center justify-between bg-slate-900/60 px-6 py-4 shadow-lg shadow-slate-950/40">
-      <div className="flex items-center gap-4">
-        <span className="rounded-full bg-primary-500/20 px-3 py-1 text-sm font-semibold text-primary-500">
-          VolleySense
-        </span>
-        <div>
-          <label htmlFor="match" className="sr-only">
-            Select match
-          </label>
+      <div className="flex items-center gap-6">
+        <div className="space-y-1">
+          <p className="text-lg font-semibold text-white">VolleySense – Auto-Stats & Trainer</p>
+          <p className="text-xs text-slate-400">Modular volleyball insights, event training, and AI summaries.</p>
+        </div>
+        <label className="flex items-center gap-2 rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm text-slate-200 shadow-inner shadow-slate-950/60">
+          <span className="text-xs uppercase tracking-wide text-slate-500">Match</span>
           <select
-            id="match"
             value={activeMatch}
             onChange={(event) => onMatchChange(event.target.value)}
-            className="rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500"
+            className="bg-transparent text-sm font-semibold text-white focus:outline-none"
           >
             {matches.map((match) => (
               <option key={match.id} value={match.id}>
@@ -36,7 +36,7 @@ const TopBar: FC<Props> = ({ activeMatch, onMatchChange, onUpload }) => {
               </option>
             ))}
           </select>
-        </div>
+        </label>
         <span className="flex items-center gap-2 rounded-full bg-green-500/10 px-3 py-1 text-xs font-semibold text-green-400">
           <span className="inline-block h-2 w-2 rounded-full bg-green-400" aria-hidden />
           Live
@@ -58,6 +58,7 @@ const TopBar: FC<Props> = ({ activeMatch, onMatchChange, onUpload }) => {
               'focus:outline-none focus:ring-2 focus:ring-primary-500'
             )}
             aria-label="Open settings"
+            onClick={onSettings}
           >
             <Settings className="h-5 w-5" />
           </button>
@@ -68,6 +69,7 @@ const TopBar: FC<Props> = ({ activeMatch, onMatchChange, onUpload }) => {
               'focus:outline-none focus:ring-2 focus:ring-primary-500'
             )}
             aria-label="Open help"
+            onClick={onHelp}
           >
             <HelpCircle className="h-5 w-5" />
           </button>

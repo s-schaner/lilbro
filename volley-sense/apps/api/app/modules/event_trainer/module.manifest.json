@@ -1,0 +1,11 @@
+{
+  "id": "event-trainer",
+  "name": "Event Trainer",
+  "version": "0.1.0",
+  "optional": true,
+  "enabled_by_default": true,
+  "backend": {
+    "router": "app.routers.trainer"
+  },
+  "health": {"endpoint": "/trainer/health", "interval_sec": 25}
+}

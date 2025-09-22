@@ -10,3 +10,8 @@ router = APIRouter(prefix="/stats", tags=["stats"])
 async def stats(game_id: str = Query(..., description="Unique game identifier")) -> StatsPayload:
     players = generate_players(game_id)
     return StatsPayload(players=players, team={"name": "VolleySense Demo"})
+
+
+@router.get("/health")
+async def health() -> dict[str, bool]:
+    return {"ok": True}
