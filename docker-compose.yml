@@ -1,0 +1,37 @@
+version: '3.9'
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    volumes:
+      - ./backend:/app
+    environment:
+      - LLM_BASE_URL=${LLM_BASE_URL:-http://localhost:1234/v1}
+      - ENABLE_TRAINER=${ENABLE_TRAINER:-true}
+      - ENABLE_SCREEN_SNAP=${ENABLE_SCREEN_SNAP:-true}
+      - ENABLE_INSIGHTS=${ENABLE_INSIGHTS:-true}
+      - ENABLE_INGEST=${ENABLE_INGEST:-true}
+      - ENABLE_EXPORTS=${ENABLE_EXPORTS:-true}
+    ports:
+      - '8000:8000'
+  web:
+    build:
+      context: .
+      dockerfile: docker/web.Dockerfile
+    command: npm run dev -- --host 0.0.0.0 --port 5173
+    environment:
+      - VITE_API_URL=http://api:8000
+      - VITE_ENABLE_TRAINER=${ENABLE_TRAINER:-true}
+      - VITE_ENABLE_SCREEN_SNAP=${ENABLE_SCREEN_SNAP:-true}
+      - VITE_ENABLE_INSIGHTS=${ENABLE_INSIGHTS:-true}
+      - VITE_ENABLE_INGEST=${ENABLE_INGEST:-true}
+      - VITE_ENABLE_EXPORTS=${ENABLE_EXPORTS:-true}
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    depends_on:
+      - api
+    ports:
+      - '5173:5173'
