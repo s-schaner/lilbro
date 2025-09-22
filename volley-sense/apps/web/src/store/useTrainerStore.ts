@@ -101,6 +101,6 @@ export const buildDefinition = (
   id: nanoid(),
   enabled: true,
   createdAt: new Date().toISOString(),
-  version: 'v1',
+  version: 'shadow',
   ...partial
 });

@@ -31,3 +31,27 @@ def test_trainer_preview_and_explain():
     assert explain.status_code == 200
     data = explain.json()
     assert "features" in data and "rules" in data
+
+
+def test_module_registry_and_toggle():
+    modules = client.get("/modules")
+    assert modules.status_code == 200
+    payload = modules.json()
+    assert any(item["id"] == "timeline" for item in payload)
+
+    toggle = client.patch("/modules/overlays", json={"enabled": True})
+    assert toggle.status_code == 200
+    assert toggle.json()["id"] == "overlays"
+
+
+def test_screensnap_analysis():
+    payload = {
+        "focus": "Blocking technique",
+        "context": {"timestamp": 104.2},
+        "image_b64": "data:image/png;base64,ZmFrZQ==",
+    }
+    response = client.post("/screensnap", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["summary"]
+    assert body["confidence"]

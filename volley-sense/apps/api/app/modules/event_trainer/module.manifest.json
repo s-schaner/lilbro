@@ -1,0 +1,17 @@
+{
+  "id": "event-trainer",
+  "name": "Event Trainer",
+  "version": "0.2.0",
+  "frontend": {
+    "mount": "left/trainer",
+    "routes": ["/trainer/events"]
+  },
+  "backend": {
+    "router": "app/modules/event_trainer/router.py",
+    "env": []
+  },
+  "permissions": ["read:trainer", "write:trainer"],
+  "health": {"endpoint": "/trainer/health", "interval_sec": 25},
+  "optional": false,
+  "enabled_by_default": true
+}

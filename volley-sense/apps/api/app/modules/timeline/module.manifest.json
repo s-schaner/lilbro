@@ -1,0 +1,17 @@
+{
+  "id": "timeline",
+  "name": "Timeline Engine",
+  "version": "0.2.0",
+  "frontend": {
+    "mount": "center/timeline",
+    "routes": []
+  },
+  "backend": {
+    "router": "app/modules/timeline/router.py",
+    "env": []
+  },
+  "permissions": ["read:events"],
+  "health": {"endpoint": "/events/health", "interval_sec": 20},
+  "optional": false,
+  "enabled_by_default": true
+}
