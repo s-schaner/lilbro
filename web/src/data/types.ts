@@ -18,15 +18,21 @@ export interface FormationSnapshot {
   back_row: string[];
 }
 
-export interface IngestJob {
-  job_id: string;
-  state: string;
-  progress: number;
-  states: string[];
-}
-
 export interface ModuleHealth {
   name: string;
   status: string;
   enabled: boolean;
+}
+
+export interface UploadResponse {
+  upload_id: string;
+  original_url: string;
+  proxy_url: string;
+  mezzanine_url: string | null;
+}
+
+export interface UploadStatus {
+  status: string;
+  stage: string;
+  progress: number;
 }

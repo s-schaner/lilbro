@@ -67,6 +67,12 @@ exports[`renders VolleySense layout snapshot 1`] = `
           </svg>
            Modules online: 1
           <button
+            class="rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+            type="button"
+          >
+            Ingest: ready
+          </button>
+          <button
             class="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"
           >
             <svg
@@ -235,40 +241,35 @@ exports[`renders VolleySense layout snapshot 1`] = `
         class="flex flex-1 flex-col gap-4"
       >
         <section
-          class="relative h-72 rounded-xl border border-slate-800 bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900"
+          class="relative h-72"
         >
           <div
-            class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center"
+            class="relative h-full w-full overflow-hidden rounded-xl border border-slate-800 bg-slate-950"
           >
-            <svg
-              class="lucide lucide-video h-12 w-12 text-slate-700"
-              fill="none"
-              height="24"
-              stroke="currentColor"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              stroke-width="2"
-              viewBox="0 0 24 24"
-              width="24"
-              xmlns="http://www.w3.org/2000/svg"
+            <video
+              class="h-full w-full object-contain"
+              controls=""
+              playsinline=""
             >
-              <path
-                d="m22 8-6 4 6 4V8Z"
-              />
-              <rect
-                height="12"
-                rx="2"
-                ry="2"
-                width="14"
-                x="2"
-                y="6"
-              />
-            </svg>
-            <p
-              class="text-sm text-slate-400"
+              Your browser does not support the video tag.
+            </video>
+            <canvas
+              aria-hidden="true"
+              class="pointer-events-none absolute inset-0 h-full w-full"
+            />
+            <div
+              class="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center"
             >
-              Video viewport placeholder with annotated overlays.
-            </p>
+              <div
+                class="text-sm text-slate-400"
+              >
+                Upload a clip to begin video analysis.
+              </div>
+            </div>
+            <canvas
+              aria-hidden="true"
+              class="hidden"
+            />
           </div>
         </section>
         <section

@@ -22,3 +22,6 @@ annotations, and LLM insights. The frontend renders the multi-panel console expe
 and feature flags.
 
 Testing is available via `pytest` for the API and `npm run test` (Vitest) for the web client.
+
+> **Upload size note:** Local development uses Uvicorn directly. When fronting the API with a proxy (NGINX, Traefik, etc.) be
+> sure to raise the maximum body size limit so larger match uploads are accepted without truncation.
