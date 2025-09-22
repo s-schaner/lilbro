@@ -18,7 +18,8 @@
       "@pages/*": ["pages/*"],
       "@hooks/*": ["hooks/*"],
       "@lib/*": ["lib/*"],
-      "@store/*": ["store/*"]
+      "@store/*": ["store/*"],
+      "@context/*": ["context/*"]
     }
   }
 }

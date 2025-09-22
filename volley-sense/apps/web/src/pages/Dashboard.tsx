@@ -1,20 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
+import { nanoid } from 'nanoid';
+
+import ModuleBoundary from '@components/ModuleBoundary';
 import TopBar from '@components/TopBar';
 import EventTrainerPanel from '@components/EventTrainerPanel';
 import VideoPlayer from '@components/VideoPlayer';
 import Timeline from '@components/Timeline';
-import RightPanel from '@components/RightPanel';
+import RightPanel, { ImageAnalysisEntry } from '@components/RightPanel';
 import FooterBar from '@components/FooterBar';
 import TeachEventModal from '@components/TeachEventModal';
 import {
   fetchEventDefinitions,
   fetchEvents,
   fetchExplain,
+  fetchInsights,
   fetchPlayers,
   fetchPreviewEvents,
+  ingestVideo,
+  pollIngestJob,
   saveEventDefinition
 } from '@lib/api';
-import { EventDefinition, EventMarker, ExplainPayload, Player } from '@lib/types';
+import {
+  EventDefinition,
+  EventMarker,
+  ExplainPayload,
+  IngestJob,
+  InsightPayload,
+  Player,
+  ScreenSnapResponse
+} from '@lib/types';
+import { useModule } from '@context/ModuleContext';
+import { useEventBus } from '@context/EventBusContext';
 import { useTrainerStore, buildDefinition } from '@store/useTrainerStore';
 import { useVideoStore } from '@store/useVideoStore';
 
@@ -22,9 +38,17 @@ const Dashboard = () => {
   const [gameId, setGameId] = useState('demo-1');
   const [players, setPlayers] = useState<Player[]>([]);
   const [baseEvents, setBaseEvents] = useState<EventMarker[]>([]);
+  const [snapMarkers, setSnapMarkers] = useState<EventMarker[]>([]);
+  const [imageAnalyses, setImageAnalyses] = useState<ImageAnalysisEntry[]>([]);
+  const [insights, setInsights] = useState<InsightPayload | null>(null);
   const [showModal, setShowModal] = useState(false);
   const [snackbar, setSnackbar] = useState<string | null>(null);
   const [explainPayload, setExplainPayload] = useState<ExplainPayload | undefined>();
+  const [ingestJob, setIngestJob] = useState<IngestJob | null>(null);
+  const [videoObjectUrl, setVideoObjectUrl] = useState<string | null>(null);
+  const bus = useEventBus();
+  const insightsModule = useModule('llm-insights');
+
   const {
     definitions,
     previewMarkers,
@@ -37,15 +61,19 @@ const Dashboard = () => {
     lastExplainedId,
     setLastExplained
   } = useTrainerStore();
-  const { currentTime, duration, seek, setMarkers } = useVideoStore();
+  const currentTime = useVideoStore((state) => state.currentTime);
+  const duration = useVideoStore((state) => state.duration);
+  const seek = useVideoStore((state) => state.seek);
+  const setMarkers = useVideoStore((state) => state.setMarkers);
+  const setSource = useVideoStore((state) => state.setSource);
 
   const activeMarkers = useMemo(() => {
     const enabledIds = new Set(definitions.filter((item) => item.enabled).map((item) => item.id));
     const preview: EventMarker[] = Object.entries(previewMarkers)
       .filter(([eventId]) => enabledIds.has(eventId))
       .flatMap(([, events]) => events);
-    return [...baseEvents, ...preview];
-  }, [baseEvents, previewMarkers, definitions]);
+    return [...baseEvents, ...preview, ...snapMarkers];
+  }, [baseEvents, previewMarkers, definitions, snapMarkers]);
 
   useEffect(() => {
     setMarkers(activeMarkers);
@@ -65,7 +93,7 @@ const Dashboard = () => {
         setSnackbar('Unable to load match data. Check API availability.');
       }
     };
-    load();
+    void load();
   }, [gameId]);
 
   useEffect(() => {
@@ -136,6 +164,14 @@ const Dashboard = () => {
     }
   };
 
+  const handleExplainLastEvent = () => {
+    if (lastExplainedId) {
+      void handleExplain(lastExplainedId);
+    } else {
+      setSnackbar('Explain an event from the trainer panel first.');
+    }
+  };
+
   const handleClips = (id: string) => {
     const definition = definitions.find((item) => item.id === id);
     setSnackbar(
@@ -174,29 +210,134 @@ const Dashboard = () => {
     return () => window.clearTimeout(timeout);
   }, [snackbar]);
 
+  const handleUpload = async (file: File) => {
+    try {
+      const job = await ingestVideo(file);
+      setIngestJob(job);
+      const url = URL.createObjectURL(file);
+      setSource(url);
+      if (videoObjectUrl) {
+        URL.revokeObjectURL(videoObjectUrl);
+      }
+      setVideoObjectUrl(url);
+      setSnackbar('Video uploaded. Transcoding to mezzanine stream.');
+    } catch (error) {
+      console.error(error);
+      setSnackbar('Video ingest failed.');
+    }
+  };
+
+  useEffect(() => {
+    if (!ingestJob || ingestJob.status === 'complete') {
+      return;
+    }
+    const interval = window.setInterval(async () => {
+      try {
+        const updated = await pollIngestJob(ingestJob.job_id);
+        setIngestJob(updated);
+        if (updated.status === 'complete') {
+          bus.emit('snackbar', 'Proxy stream ready. Overlays synced.');
+          window.clearInterval(interval);
+        }
+      } catch (error) {
+        console.error(error);
+      }
+    }, 1500);
+    return () => window.clearInterval(interval);
+  }, [ingestJob, bus]);
+
+  useEffect(() => {
+    if (insightsModule && !insightsModule.enabled) {
+      setInsights(null);
+      return;
+    }
+    const loadInsights = async () => {
+      try {
+        const payload = await fetchInsights(gameId);
+        setInsights(payload);
+      } catch (error) {
+        console.warn('Insights unavailable', error);
+        setInsights(null);
+      }
+    };
+    void loadInsights();
+  }, [gameId, insightsModule]);
+
+  useEffect(() => {
+    const handlePin = (marker: EventMarker) => {
+      setSnapMarkers((previous) => [...previous, marker]);
+    };
+    const handleAnalysis = ({
+      note
+    }: {
+      note: ScreenSnapResponse & { focus: string; timestamp: number };
+    }) => {
+      setImageAnalyses((previous) => [
+        {
+          id: nanoid(),
+          summary: note.summary,
+          focus: note.focus,
+          timestamp: note.timestamp,
+          observations: note.observations,
+          corrections: note.corrections,
+          confidence: note.confidence
+        },
+        ...previous
+      ]);
+    };
+    const handleSnackbar = (message: string) => {
+      setSnackbar(message);
+    };
+
+    bus.on('timeline:pin', handlePin);
+    bus.on('analysis:add', handleAnalysis);
+    bus.on('snackbar', handleSnackbar);
+    return () => {
+      bus.off('timeline:pin', handlePin);
+      bus.off('analysis:add', handleAnalysis);
+      bus.off('snackbar', handleSnackbar);
+    };
+  }, [bus]);
+
+  useEffect(() => {
+    return () => {
+      if (videoObjectUrl) {
+        URL.revokeObjectURL(videoObjectUrl);
+      }
+    };
+  }, [videoObjectUrl]);
+
   return (
     <div className="flex min-h-screen flex-col gap-4 bg-slate-950 px-6 pb-6 pt-4">
-      <TopBar activeMatch={gameId} onMatchChange={setGameId} onUpload={() => setSnackbar('Upload flow coming soon.')} />
+      <TopBar activeMatch={gameId} onMatchChange={setGameId} onUpload={handleUpload} />
       <div className="flex flex-1 gap-4">
-        <EventTrainerPanel
-          events={definitions}
-          loadingMap={loadingPreviews}
-          explainedId={lastExplainedId}
-          explainPayload={explainPayload}
-          onTeach={() => setShowModal(true)}
-          onToggle={handleToggle}
-          onThresholdChange={handleThreshold}
-          onPreview={handlePreview}
-          onExplain={handleExplain}
-          onClips={handleClips}
-        />
-        <div className="flex flex-1 flex-col gap-4">
-          <VideoPlayer />
-          <Timeline markers={activeMarkers} currentTime={currentTime} duration={duration} onSeek={seek} />
+        <div className="flex w-80">
+          <ModuleBoundary moduleId="event-trainer">
+            <EventTrainerPanel
+              events={definitions}
+              loadingMap={loadingPreviews}
+              explainedId={lastExplainedId}
+              explainPayload={explainPayload}
+              onTeach={() => setShowModal(true)}
+              onToggle={handleToggle}
+              onThresholdChange={handleThreshold}
+              onPreview={handlePreview}
+              onExplain={handleExplain}
+              onClips={handleClips}
+            />
+          </ModuleBoundary>
         </div>
-        <RightPanel players={players} events={activeMarkers} onSeek={seek} />
+        <div className="flex flex-1 flex-col gap-4">
+          <ModuleBoundary moduleId="core-video">
+            <VideoPlayer gameId={gameId} onExplainLast={handleExplainLastEvent} />
+          </ModuleBoundary>
+          <ModuleBoundary moduleId="timeline">
+            <Timeline markers={activeMarkers} currentTime={currentTime} duration={duration} onSeek={seek} />
+          </ModuleBoundary>
+        </div>
+        <RightPanel players={players} events={activeMarkers} onSeek={seek} insights={insights} imageAnalyses={imageAnalyses} />
       </div>
-      <FooterBar gameId={gameId} />
+      <FooterBar gameId={gameId} ingestStatus={ingestJob?.status} />
       <TeachEventModal open={showModal} onClose={() => setShowModal(false)} onSubmit={handleModalSubmit} />
       {snackbar ? (
         <div className="fixed bottom-6 left-1/2 -translate-x-1/2 rounded-full border border-slate-700 bg-slate-900/90 px-4 py-2 text-sm text-slate-100 shadow-lg">

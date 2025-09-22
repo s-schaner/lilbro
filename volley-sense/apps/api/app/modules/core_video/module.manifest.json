@@ -1,0 +1,17 @@
+{
+  "id": "core-video",
+  "name": "Core Video Ingest",
+  "version": "0.2.0",
+  "frontend": {
+    "mount": "center/video",
+    "routes": ["/ingest/jobs"]
+  },
+  "backend": {
+    "router": "app/modules/core_video/router.py",
+    "env": ["FFMPEG_BIN"]
+  },
+  "permissions": ["read:upload", "write:storage"],
+  "health": {"endpoint": "/ingest/health", "interval_sec": 15},
+  "optional": false,
+  "enabled_by_default": true
+}

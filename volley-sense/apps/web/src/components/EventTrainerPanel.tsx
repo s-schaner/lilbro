@@ -55,6 +55,11 @@ const EventTrainerPanel: FC<Props> = ({
               <div>
                 <p className="text-sm font-semibold text-white">{event.name}</p>
                 <p className="text-xs text-slate-400">Template: {event.template}</p>
+                {event.version === 'shadow' ? (
+                  <span className="mt-1 inline-flex items-center rounded-full bg-purple-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-purple-200">
+                    Shadow mode
+                  </span>
+                ) : null}
               </div>
               <Switch
                 checked={event.enabled}

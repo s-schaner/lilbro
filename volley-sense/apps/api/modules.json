@@ -1,0 +1,11 @@
+{
+  "llm-insights": {
+    "enabled": true
+  },
+  "overlays": {
+    "enabled": true
+  },
+  "screensnap-insights": {
+    "enabled": true
+  }
+}
