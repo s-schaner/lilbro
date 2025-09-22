@@ -1,0 +1,17 @@
+{
+  "id": "exports",
+  "name": "Report Exports",
+  "version": "0.2.0",
+  "frontend": {
+    "mount": "footer/exports",
+    "routes": ["/export/summary.pdf", "/export/players.csv", "/export/highlights.zip"]
+  },
+  "backend": {
+    "router": "app/modules/exports/router.py",
+    "env": []
+  },
+  "permissions": ["read:stats", "write:exports"],
+  "health": {"endpoint": "/export/health", "interval_sec": 40},
+  "optional": false,
+  "enabled_by_default": true
+}

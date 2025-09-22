@@ -1,4 +1,17 @@
-import { EventDefinition, EventMarker, Player, ExplainPayload } from './types';
+import {
+  EventDefinition,
+  EventExample,
+  EventMarker,
+  Player,
+  ExplainPayload,
+  ModuleStatus,
+  InsightPayload,
+  ScreenSnapResponse,
+  OverlayPayload,
+  IngestJob,
+  TrainingJob,
+  VlmAssistResponse
+} from './types';
 
 const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8000';
 
@@ -66,6 +79,84 @@ export const fetchExplain = async (eventId: string): Promise<ExplainPayload> => 
   return (await res.json()) as ExplainPayload;
 };
 
+type EventExampleInput = Omit<EventExample, 'id'> & { id?: string };
+
+export const createEventExample = async (
+  example: EventExampleInput
+): Promise<EventExample> => {
+  const res = await fetch(`${API_URL}/trainer/examples`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(example)
+  });
+  if (!res.ok) {
+    throw new Error('Failed to save event example');
+  }
+  return (await res.json()) as EventExample;
+};
+
+export const listEventExamples = async (template?: string): Promise<EventExample[]> => {
+  const url = new URL(`${API_URL}/trainer/examples`);
+  if (template) {
+    url.searchParams.set('type', template);
+  }
+  const res = await fetch(url.toString());
+  if (!res.ok) {
+    throw new Error('Failed to load event examples');
+  }
+  return (await res.json()) as EventExample[];
+};
+
+export const requestTraining = async (
+  payload: { event_id: string; example_ids?: string[] }
+): Promise<TrainingJob> => {
+  const res = await fetch(`${API_URL}/trainer/train`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    throw new Error('Failed to start training');
+  }
+  return (await res.json()) as TrainingJob;
+};
+
+export const fetchTrainingStatus = async (jobId: string): Promise<TrainingJob> => {
+  const res = await fetch(`${API_URL}/trainer/status/${encodeURIComponent(jobId)}`);
+  if (!res.ok) {
+    throw new Error('Failed to read training status');
+  }
+  return (await res.json()) as TrainingJob;
+};
+
+export const requestVlmAssist = async (
+  payload: { focus: string; hints?: string[]; image_b64: string }
+): Promise<VlmAssistResponse> => {
+  const res = await fetch(`${API_URL}/trainer/vlm/label`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    throw new Error('VLM assist unavailable');
+  }
+  return (await res.json()) as VlmAssistResponse;
+};
+
+export const publishTrainerModel = async (
+  payload: { event_id: string; version: string }
+): Promise<{ event_id: string; version: string; status: string }> => {
+  const res = await fetch(`${API_URL}/trainer/publish`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) {
+    throw new Error('Failed to publish trainer model');
+  }
+  return res.json();
+};
+
 export const downloadExport = async (path: string, filename: string) => {
   const res = await fetch(`${API_URL}${path}`);
   if (!res.ok) {
@@ -92,4 +183,79 @@ export const postAnalyze = async (gameId: string) => {
     throw new Error('Failed to start analysis');
   }
   return res.json() as Promise<{ game_id: string; status: string }>;
+};
+
+export const fetchModules = async (): Promise<ModuleStatus[]> => {
+  const res = await fetch(`${API_URL}/modules`);
+  if (!res.ok) {
+    throw new Error('Failed to load modules');
+  }
+  return (await res.json()) as ModuleStatus[];
+};
+
+export const toggleModule = async (moduleId: string, enabled: boolean): Promise<ModuleStatus> => {
+  const res = await fetch(`${API_URL}/modules/${encodeURIComponent(moduleId)}`, {
+    method: 'PATCH',
+    headers: jsonHeaders,
+    body: JSON.stringify({ enabled })
+  });
+  if (!res.ok) {
+    throw new Error('Failed to toggle module');
+  }
+  return (await res.json()) as ModuleStatus;
+};
+
+export const fetchInsights = async (gameId: string): Promise<InsightPayload> => {
+  const res = await fetch(`${API_URL}/insights?game_id=${encodeURIComponent(gameId)}`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch insights');
+  }
+  return (await res.json()) as InsightPayload;
+};
+
+export const analyzeScreenshot = async (
+  focus: string,
+  image_b64: string,
+  context: Record<string, unknown>
+): Promise<ScreenSnapResponse> => {
+  const res = await fetch(`${API_URL}/screensnap`, {
+    method: 'POST',
+    headers: jsonHeaders,
+    body: JSON.stringify({ focus, image_b64, context })
+  });
+  if (!res.ok) {
+    throw new Error('Failed to analyze screenshot');
+  }
+  return (await res.json()) as ScreenSnapResponse;
+};
+
+export const fetchOverlays = async (gameId: string, ts: number): Promise<OverlayPayload> => {
+  const res = await fetch(
+    `${API_URL}/overlays?game_id=${encodeURIComponent(gameId)}&ts=${encodeURIComponent(ts)}`
+  );
+  if (!res.ok) {
+    throw new Error('Failed to fetch overlays');
+  }
+  return (await res.json()) as OverlayPayload;
+};
+
+export const ingestVideo = async (file: File): Promise<IngestJob> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch(`${API_URL}/ingest`, {
+    method: 'POST',
+    body: formData
+  });
+  if (!res.ok) {
+    throw new Error('Failed to ingest video');
+  }
+  return (await res.json()) as IngestJob;
+};
+
+export const pollIngestJob = async (jobId: string): Promise<IngestJob> => {
+  const res = await fetch(`${API_URL}/ingest/${encodeURIComponent(jobId)}`);
+  if (!res.ok) {
+    throw new Error('Failed to fetch ingest job');
+  }
+  return (await res.json()) as IngestJob;
 };

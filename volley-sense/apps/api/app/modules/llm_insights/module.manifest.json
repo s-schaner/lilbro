@@ -1,0 +1,17 @@
+{
+  "id": "llm-insights",
+  "name": "LLM Match Insights",
+  "version": "0.2.0",
+  "frontend": {
+    "mount": "right/insights",
+    "routes": ["/insights"]
+  },
+  "backend": {
+    "router": "app/modules/llm_insights/router.py",
+    "env": ["LLM_BASE_URL", "LLM_MODEL", "LLM_API_KEY"]
+  },
+  "permissions": ["net:http"],
+  "health": {"endpoint": "/insights/health", "interval_sec": 45},
+  "optional": true,
+  "enabled_by_default": true
+}
