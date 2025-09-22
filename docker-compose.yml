@@ -1,4 +1,3 @@
-version: '3.9'
 services:
   api:
     build:
@@ -7,7 +6,9 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     volumes:
       - ./backend:/app
+      - data:/data
     environment:
+      - DATA_ROOT=/data
       - LLM_BASE_URL=${LLM_BASE_URL:-http://localhost:1234/v1}
       - ENABLE_TRAINER=${ENABLE_TRAINER:-true}
       - ENABLE_SCREEN_SNAP=${ENABLE_SCREEN_SNAP:-true}
@@ -22,7 +23,7 @@ services:
       dockerfile: docker/web.Dockerfile
     command: npm run dev -- --host 0.0.0.0 --port 5173
     environment:
-      - VITE_API_URL=http://api:8000
+      - VITE_API_URL=http://localhost:8000
       - VITE_ENABLE_TRAINER=${ENABLE_TRAINER:-true}
       - VITE_ENABLE_SCREEN_SNAP=${ENABLE_SCREEN_SNAP:-true}
       - VITE_ENABLE_INSIGHTS=${ENABLE_INSIGHTS:-true}
@@ -31,7 +32,10 @@ services:
     volumes:
       - ./web:/app
       - /app/node_modules
+      # - data:/data:ro
     depends_on:
       - api
     ports:
       - '5173:5173'
+volumes:
+  data: {}
