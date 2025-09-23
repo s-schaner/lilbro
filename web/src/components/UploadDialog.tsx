@@ -1,20 +1,12 @@
-import React, {
-  DragEvent,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import React, { DragEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, UploadCloud } from 'lucide-react';
 
-import { UploadResponse, UploadStatus, UPLOAD_STAGE_LABELS } from '../data/types';
+import { UPLOAD_STAGE_LABELS } from '../data/types';
+import { useIngestStore } from '../store/ingestStore';
 
 interface UploadDialogProps {
   open: boolean;
   onClose: () => void;
-  onReady: (payload: UploadResponse) => void;
-  onError?: (message: string) => void;
   onShowLogs?: () => void;
   apiUrl?: string;
 }
@@ -32,102 +24,45 @@ const formatStageLabel = (stage?: string | null) => {
   return fallback.charAt(0).toUpperCase() + fallback.slice(1);
 };
 
-export const UploadDialog: React.FC<UploadDialogProps> = ({
-  open,
-  onClose,
-  onReady,
-  onError,
-  onShowLogs,
-  apiUrl,
-}) => {
+export const UploadDialog: React.FC<UploadDialogProps> = ({ open, onClose, onShowLogs, apiUrl }) => {
   const [isDragActive, setDragActive] = useState(false);
-  const [isSubmitting, setSubmitting] = useState(false);
-  const [status, setStatus] = useState<UploadStatus | null>(null);
-  const [uploadInfo, setUploadInfo] = useState<UploadResponse | null>(null);
-  const [uploadId, setUploadId] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const uploadInfoRef = useRef<UploadResponse | null>(null);
-
   const apiBase = useMemo(() => apiUrl ?? import.meta.env.VITE_API_URL ?? 'http://localhost:8000', [apiUrl]);
+
+  const { uploadId, status, error, isUploading, start, poll, reset } = useIngestStore((state) => ({
+    uploadId: state.uploadId,
+    status: state.status,
+    error: state.error,
+    isUploading: state.isUploading,
+    start: state.start,
+    poll: state.poll,
+    reset: state.reset,
+  }));
 
   useEffect(() => {
     if (!open) {
       setDragActive(false);
-      setSubmitting(false);
-      setStatus(null);
-      setUploadInfo(null);
-      setUploadId(null);
-      setError(null);
-      uploadInfoRef.current = null;
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
+      if (!status || status.status !== 'ready') {
+        reset();
+      }
     }
-  }, [open]);
-
-  useEffect(() => {
-    uploadInfoRef.current = uploadInfo;
-  }, [uploadInfo]);
-
-  const handleUploadError = useCallback(
-    (message: string) => {
-      setError(message);
-      onError?.(message);
-    },
-    [onError],
-  );
+  }, [open, reset, status]);
 
   const handleFiles = useCallback(
     async (files: FileList | null) => {
       if (!files || files.length === 0) return;
       const [file] = files;
-      setSubmitting(true);
-      setError(null);
-      setStatus(null);
-
-      const formData = new FormData();
-      formData.append('file', file);
-
       try {
-        const response = await fetch(`${apiBase}/ingest/upload`, {
-          method: 'POST',
-          body: formData,
-        });
-
-        if (response.status === 415) {
-          handleUploadError('Unsupported file type. Please choose a compatible video.');
-          return;
-        }
-
-        if (!response.ok) {
-          handleUploadError('Upload failed. Please try again.');
-          return;
-        }
-
-        const payload = (await response.json()) as UploadResponse;
-        setUploadInfo(payload);
-        uploadInfoRef.current = payload;
-        setUploadId(payload.upload_id);
-        setStatus({
-          status: 'queued',
-          stage: 'queued',
-          progress: 0,
-          assets: {
-            original_url: payload.original_url,
-            proxy_url: payload.proxy_url,
-            mezzanine_url: payload.mezzanine_url,
-            thumbs_glob: payload.thumbs_glob,
-            keyframes_csv: payload.keyframes_csv,
-          },
-        });
+        await start(file, apiBase);
+        await poll(apiBase);
       } catch (err) {
-        handleUploadError((err as Error).message || 'Upload failed.');
-      } finally {
-        setSubmitting(false);
+        console.error('Upload failed', err);
       }
     },
-    [apiBase, handleUploadError],
+    [apiBase, poll, start],
   );
 
   const onDrop = useCallback(
@@ -156,113 +91,18 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
   );
 
   useEffect(() => {
-    if (!open || !uploadId) return undefined;
-
-    let cancelled = false;
-    let timeout: ReturnType<typeof setTimeout> | null = null;
-
-    const poll = async (): Promise<void> => {
-      if (cancelled) return;
-      try {
-        const response = await fetch(
-          `${apiBase}/ingest/status?upload_id=${encodeURIComponent(uploadId)}`,
-        );
-        if (!response.ok) {
-          throw new Error('Unable to update ingest status.');
-        }
-        const payload = (await response.json()) as UploadStatus;
-        if (cancelled) return;
-        setStatus(payload);
-
-        if (!payload.assets) {
-          handleUploadError('Upload status missing asset metadata.');
-          return;
-        }
-
-        if (payload.status === 'error') {
-          const message = payload.message ?? 'Upload failed.';
-          setError(message);
-          handleUploadError(message);
-          return;
-        }
-
-        if (payload.status === 'ready') {
-          const assets = payload.assets;
-          const originalUrl =
-            assets.original_url ?? uploadInfoRef.current?.original_url ?? null;
-          const proxyUrl = assets.proxy_url ?? null;
-
-          if (!originalUrl || !proxyUrl) {
-            const message = 'Upload ready but missing asset locations.';
-            setError(message);
-            handleUploadError(message);
-            return;
-          }
-
-          const readyPayload: UploadResponse = {
-            upload_id: uploadId,
-            original_url: originalUrl,
-            proxy_url: proxyUrl,
-            mezzanine_url: assets.mezzanine_url ?? null,
-            thumbs_glob: assets.thumbs_glob ?? null,
-            keyframes_csv: assets.keyframes_csv ?? null,
-          };
-
-          setUploadInfo(readyPayload);
-          uploadInfoRef.current = readyPayload;
-          onReady(readyPayload);
-          timeout = setTimeout(() => {
-            if (!cancelled) {
-              onClose();
-            }
-          }, 400);
-          return;
-        }
-
-        setError(null);
-        timeout = setTimeout(() => {
-          void poll();
-        }, 1000);
-      } catch (err) {
-        if (cancelled) return;
-        handleUploadError((err as Error).message || 'Unable to update ingest status.');
-      }
-    };
-
-    const startAndPoll = async (): Promise<void> => {
-      try {
-        const response = await fetch(`${apiBase}/ingest/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ upload_id: uploadId }),
-        });
-
-        if (!response.ok) {
-          const detail = await response.json().catch(() => null);
-          const message =
-            (detail && (detail.message || detail.detail)) ||
-            'Unable to start ingest job.';
-          handleUploadError(message);
-          return;
-        }
-
-        setError(null);
-        await poll();
-      } catch (err) {
-        if (cancelled) return;
-        handleUploadError((err as Error).message || 'Unable to start ingest job.');
-      }
-    };
-
-    void startAndPoll();
-
-    return () => {
-      cancelled = true;
-      if (timeout) {
-        clearTimeout(timeout);
-      }
-    };
-  }, [apiBase, handleUploadError, onClose, onReady, open, uploadId]);
+    if (!open) {
+      return;
+    }
+    if (!uploadId) {
+      void poll(apiBase);
+      return;
+    }
+    if (status && ['ready', 'error'].includes(status.status)) {
+      return;
+    }
+    void poll(apiBase, uploadId);
+  }, [apiBase, open, poll, status, uploadId]);
 
   if (!open) {
     return null;
@@ -270,6 +110,7 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
 
   const stageLabel = formatStageLabel(status?.stage ?? null);
   const progressPercent = status ? Math.min(100, Math.max(0, status.progress)) : 0;
+  const hasCompleted = Boolean(uploadId && status?.status === 'ready');
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8" role="dialog" aria-modal="true">
@@ -318,7 +159,7 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
                 <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
               ) : status?.status === 'error' ? (
                 <AlertCircle className="h-4 w-4 text-red-400" aria-hidden="true" />
-              ) : isSubmitting || status ? (
+              ) : isUploading || status ? (
                 <Loader2 className="h-4 w-4 animate-spin text-brand" aria-hidden="true" />
               ) : (
                 <UploadCloud className="h-4 w-4 text-slate-400" aria-hidden="true" />
@@ -355,6 +196,11 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
                 </button>
               )}
             </div>
+          </div>
+        )}
+        {hasCompleted && (
+          <div className="mt-4 rounded-md border border-emerald-500/40 bg-emerald-500/10 p-3 text-xs text-emerald-100">
+            Upload complete. You can close this window or start another upload.
           </div>
         )}
       </div>
