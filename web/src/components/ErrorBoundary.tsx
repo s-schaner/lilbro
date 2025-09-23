@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { PropsWithChildren } from 'react';
 
 interface ErrorBoundaryState {
   hasError: boolean;
   message?: string;
 }
 
-export class ErrorBoundary extends React.Component<{ label: string }, ErrorBoundaryState> {
-  constructor(props: { label: string }) {
+type ErrorBoundaryProps = PropsWithChildren<{ label: string }>;
+
+export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  constructor(props: ErrorBoundaryProps) {
     super(props);
     this.state = { hasError: false };
   }

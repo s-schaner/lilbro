@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { UploadCloud, Video, Layers, Camera } from 'lucide-react';
+import { UploadCloud, Video, Layers, Camera, MousePointer2, Square, PenTool, Ruler } from 'lucide-react';
 import { FeatureFlagsProvider, useFeatureFlags } from './context/FeatureFlagsContext';
 import { useVolleyData } from './hooks/useVolleyData';
 import { useModuleHealth } from './hooks/useModuleHealth';
@@ -13,8 +13,33 @@ import { ModuleHealthList } from './components/ModuleHealthList';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { UploadDialog } from './components/UploadDialog';
 import { VideoViewport, VideoViewportHandle } from './components/VideoViewport';
+import {
+  OverlayCanvas,
+  AnnotationRecord,
+  AnnotationInput,
+  CalibrationData,
+} from './components/OverlayCanvas';
 import { LogFilters, UploadResponse, UploadStatus, UPLOAD_STAGE_LABELS } from './data/types';
 import LogsTab from './pages/LogsTab';
+import { CalibrationWizard } from './pages/CalibrationWizard';
+import { useOverlayTool, OverlayTool } from './hooks/useOverlayTool';
+
+const clampValue = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+
+const applyHomography = (matrix: number[][] | null | undefined, x: number, y: number): [number, number] | null => {
+  if (!matrix || matrix.length !== 3) return null;
+  const denom = matrix[2][0] * x + matrix[2][1] * y + matrix[2][2];
+  if (Math.abs(denom) < 1e-6) return null;
+  const px = (matrix[0][0] * x + matrix[0][1] * y + matrix[0][2]) / denom;
+  const py = (matrix[1][0] * x + matrix[1][1] * y + matrix[1][2]) / denom;
+  return [px, py];
+};
+
+const formatTimestamp = (time: number) => {
+  const minutes = Math.floor(time / 60);
+  const seconds = Math.floor(time % 60);
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+};
 
 const AppShell: React.FC = () => {
   const { players, events, formation, loading } = useVolleyData();
@@ -34,10 +59,26 @@ const AppShell: React.FC = () => {
   const [ingestStage, setIngestStage] = useState<string>('checking');
   const [healthTick, setHealthTick] = useState(0);
   const viewportRef = useRef<VideoViewportHandle>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const [logFilters, setLogFilters] = useState<LogFilters>({});
   const mezzanineUrlRef = useRef<string | null>(null);
   const thumbsGlobRef = useRef<string | null>(null);
   const keyframesCsvRef = useRef<string | null>(null);
+  const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
+  const [calibration, setCalibration] = useState<CalibrationData | null>(null);
+  const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const [hoverPreview, setHoverPreview] = useState<{ time: number; left: number; url: string; timeLabel: string } | null>(
+    null,
+  );
+  const timelineRef = useRef<HTMLDivElement>(null);
+  const { tool, setTool } = useOverlayTool();
+  const calibrationHelpers = useMemo(() => {
+    if (!calibration) return null;
+    return {
+      pixelToCourt: (x: number, y: number) => applyHomography(calibration.homography, x, y),
+      courtToPixel: (u: number, v: number) => applyHomography(calibration.homography_inv, u, v),
+    };
+  }, [calibration]);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL ?? 'http://localhost:8000', []);
   const formatStageLabel = useCallback((stage?: string | null) => {
@@ -103,11 +144,100 @@ const AppShell: React.FC = () => {
     }
   }, [activeTab, availableTabs]);
 
+  useEffect(() => {
+    const handleToolKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName.toLowerCase();
+        if (tag === 'input' || tag === 'textarea' || tag === 'select' || target.isContentEditable) {
+          return;
+        }
+      }
+      if (event.key === 'v' || event.key === 'V') {
+        setTool('select');
+      } else if (event.key === 'b' || event.key === 'B') {
+        setTool('box');
+      } else if (event.key === 'l' || event.key === 'L') {
+        setTool('lasso');
+      }
+    };
+    window.addEventListener('keydown', handleToolKey);
+    return () => window.removeEventListener('keydown', handleToolKey);
+  }, [setTool]);
+
   const timelineMax = useMemo(() => Math.max(60, ...events.map((event) => event.timestamp)), [events]);
 
   const pushToast = useCallback((message: string, tone: 'error' | 'success') => {
     setToast({ id: Date.now(), message, tone });
   }, []);
+
+  const fetchAnnotations = useCallback(
+    async (uploadId: string) => {
+      try {
+        const response = await fetch(`${apiBase}/annotations/${uploadId}`);
+        if (!response.ok) {
+          throw new Error('Failed to load annotations');
+        }
+        const payload = (await response.json()) as AnnotationRecord[];
+        setAnnotations(payload);
+      } catch (error) {
+        console.error('Annotation fetch failed', error);
+        setAnnotations([]);
+      }
+    },
+    [apiBase],
+  );
+
+  const fetchCalibration = useCallback(
+    async (uploadId: string) => {
+      try {
+        const response = await fetch(`${apiBase}/calibration/${uploadId}`);
+        if (response.status === 404) {
+          setCalibration(null);
+          return;
+        }
+        if (!response.ok) {
+          throw new Error('Failed to load calibration');
+        }
+        const payload = (await response.json()) as CalibrationData;
+        setCalibration(payload);
+      } catch (error) {
+        console.error('Calibration fetch failed', error);
+        setCalibration(null);
+      }
+    },
+    [apiBase],
+  );
+
+  const saveAnnotation = useCallback(
+    async (payload: AnnotationInput) => {
+      if (!lastUploadId) {
+        throw new Error('Upload required before adding annotations.');
+      }
+      const response = await fetch(`${apiBase}/annotations/${lastUploadId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(detail || 'Unable to save annotation');
+      }
+      const record = (await response.json()) as AnnotationRecord;
+      setAnnotations((prev) => [...prev, record]);
+      pushToast('Annotation saved.', 'success');
+      return record;
+    },
+    [apiBase, lastUploadId, pushToast],
+  );
+
+  const handleCalibrationSaved = useCallback(
+    (payload: CalibrationData) => {
+      setCalibration(payload);
+      pushToast('Calibration saved.', 'success');
+    },
+    [pushToast],
+  );
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -134,6 +264,9 @@ const AppShell: React.FC = () => {
       keyframesCsvRef.current = payload.keyframes_csv;
       setLastUploadId(payload.upload_id);
       setShowUpload(false);
+      setAnnotations([]);
+      setCalibration(null);
+      setHoverPreview(null);
       pushToast('Upload ready for playback.', 'success');
     },
     [apiBase, pushToast],
@@ -145,6 +278,16 @@ const AppShell: React.FC = () => {
     },
     [pushToast],
   );
+
+  useEffect(() => {
+    if (!lastUploadId) {
+      setAnnotations([]);
+      setCalibration(null);
+      return;
+    }
+    fetchAnnotations(lastUploadId).catch(() => {});
+    fetchCalibration(lastUploadId).catch(() => {});
+  }, [fetchAnnotations, fetchCalibration, lastUploadId]);
 
   const handleViewLogs = useCallback(() => {
     setLogFilters({ level: 'ERROR', source: 'ingest' });
@@ -159,6 +302,31 @@ const AppShell: React.FC = () => {
     }
     pushToast('Frame captured for ScreenSnap.', 'success');
   }, [pushToast]);
+
+  const handleTimelineMove = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (!videoSrc) return;
+      const template = thumbsGlobRef.current;
+      if (!timelineRef.current || !template || !template.includes('%04d')) {
+        setHoverPreview(null);
+        return;
+      }
+      const rect = timelineRef.current.getBoundingClientRect();
+      if (!rect.width) return;
+      const ratio = clampValue((event.clientX - rect.left) / rect.width, 0, 1);
+      const time = ratio * timelineMax;
+      const frameIndex = Math.max(0, Math.round(time));
+      const padded = (frameIndex + 1).toString().padStart(4, '0');
+      const url = `${apiBase}${template.replace('%04d', padded)}`;
+      const left = clampValue(event.clientX - rect.left, 40, rect.width - 40);
+      setHoverPreview({ time, left, url, timeLabel: formatTimestamp(time) });
+    },
+    [apiBase, timelineMax, videoSrc],
+  );
+
+  const handleTimelineLeave = useCallback(() => {
+    setHoverPreview(null);
+  }, []);
 
   const refreshHealth = useCallback(() => {
     setIngestHealth((prev) => (prev === 'disabled' ? prev : 'loading'));
@@ -332,22 +500,94 @@ const AppShell: React.FC = () => {
         </div>
         <div className="flex flex-1 flex-col gap-4">
           <section className="relative h-72">
-            <VideoViewport ref={viewportRef} src={videoSrc} poster={posterUrl} />
+            <VideoViewport
+              ref={viewportRef}
+              src={videoSrc}
+              poster={posterUrl}
+              videoRef={videoElementRef}
+            />
             {videoSrc && (
-              <div className="absolute right-4 top-4 flex gap-2">
-                <button
-                  type="button"
-                  onClick={handleCaptureStill}
-                  className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand"
-                >
-                  <Camera className="h-3.5 w-3.5" /> Capture still
-                </button>
-              </div>
+              <>
+                <OverlayCanvas
+                  videoRef={videoElementRef}
+                  uploadId={lastUploadId}
+                  annotations={annotations}
+                  calibration={calibration}
+                  mode={tool}
+                  onCreate={saveAnnotation}
+                  pixelToCourt={calibrationHelpers?.pixelToCourt}
+                />
+                <div className="absolute left-4 top-4 flex items-center gap-2">
+                  {([
+                    { id: 'select' as OverlayTool, label: 'Select', icon: <MousePointer2 className="h-4 w-4" />, shortcut: 'V' },
+                    { id: 'box' as OverlayTool, label: 'Box', icon: <Square className="h-4 w-4" />, shortcut: 'B' },
+                    { id: 'lasso' as OverlayTool, label: 'Lasso', icon: <PenTool className="h-4 w-4" />, shortcut: 'L' },
+                  ]).map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setTool(item.id)}
+                      className={`inline-flex items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-medium transition ${
+                        tool === item.id
+                          ? 'border-brand bg-brand/20 text-brand-100'
+                          : 'border-slate-700 bg-slate-900/70 text-slate-300 hover:border-slate-500'
+                      }`}
+                    >
+                      {item.icon}
+                      {item.label}
+                      <span className="text-[10px] text-slate-500">({item.shortcut})</span>
+                    </button>
+                  ))}
+                  {calibration && (
+                    <span className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1 text-[11px] font-semibold text-emerald-100">
+                      Calibrated
+                    </span>
+                  )}
+                </div>
+                <div className="absolute right-4 top-4 flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCalibrationOpen(true)}
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    <Ruler className="h-3.5 w-3.5" /> Calibrate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCaptureStill}
+                    className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand"
+                  >
+                    <Camera className="h-3.5 w-3.5" /> Capture still
+                  </button>
+                </div>
+              </>
             )}
           </section>
           <section className="module-card">
-            <div className="relative h-20">
+            <div
+              ref={timelineRef}
+              className="relative h-20"
+              onMouseMove={handleTimelineMove}
+              onMouseLeave={handleTimelineLeave}
+            >
               <div className="absolute left-0 right-0 top-1/2 h-0.5 -translate-y-1/2 bg-slate-700" />
+              {hoverPreview && (
+                <div
+                  className="absolute bottom-full mb-3 flex -translate-x-1/2 flex-col items-center"
+                  style={{ left: `${hoverPreview.left}px` }}
+                >
+                  <div className="overflow-hidden rounded-lg border border-slate-700 bg-slate-900 text-xs shadow-lg">
+                    <img
+                      src={hoverPreview.url}
+                      alt="Timeline preview"
+                      className="h-20 w-32 object-cover"
+                    />
+                    <div className="border-t border-slate-700 px-2 py-1 text-[11px] text-slate-300">
+                      {hoverPreview.timeLabel}
+                    </div>
+                  </div>
+                </div>
+              )}
               {events.map((event) => (
                 <div
                   key={event.id}
@@ -414,6 +654,14 @@ const AppShell: React.FC = () => {
         onError={handleUploadError}
         onShowLogs={handleViewLogs}
         apiUrl={apiBase}
+      />
+      <CalibrationWizard
+        open={calibrationOpen}
+        onClose={() => setCalibrationOpen(false)}
+        videoRef={videoElementRef}
+        uploadId={lastUploadId ?? undefined}
+        apiBase={apiBase}
+        onSaved={handleCalibrationSaved}
       />
     </div>
   );
