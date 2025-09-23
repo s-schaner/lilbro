@@ -378,6 +378,11 @@ exports[`renders VolleySense layout snapshot 1`] = `
             >
               Insights
             </button>
+            <button
+              class="tab-button bg-slate-800 text-slate-300"
+            >
+              Logs
+            </button>
           </div>
           <div
             class="mt-4"

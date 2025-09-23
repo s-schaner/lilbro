@@ -36,3 +36,17 @@ export interface UploadStatus {
   stage: string;
   progress: number;
 }
+
+export interface LogEntry {
+  ts: string | number;
+  level: string;
+  source: string;
+  msg: string;
+  meta?: Record<string, unknown> | null;
+}
+
+export interface LogFilters {
+  level?: string;
+  source?: string;
+  search?: string;
+}
