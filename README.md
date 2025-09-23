@@ -19,6 +19,10 @@ docker/         # Runtime Dockerfiles
    service name when using `docker-compose`).
 3. Run `docker-compose up --build` to start the stack (API on port 8000, web on port 5173).
 
+If you access the frontend from a host other than `http://localhost:5173` (for example, a Docker network IP, Codespaces URL, or
+ngrok tunnel), set the backend `ALLOWED_FRONTEND_ORIGINS` environment variable to a comma-separated list of origins so the API
+will accept requests from those addresses. The default value already includes the local Vite dev server.
+
 The backend exposes mocked routes for analysis, events, stats, exports, trainer proposals, ingest progress, ScreenSnap
 annotations, and LLM insights. The frontend renders the multi-panel console experience with module guards, error boundaries,
 and feature flags.
