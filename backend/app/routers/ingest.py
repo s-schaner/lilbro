@@ -1,195 +1,80 @@
-"""Ingest routes for handling direct video uploads."""
+"""Ingest routes orchestrating background media processing."""
 from __future__ import annotations
 
+import asyncio
 import os
+import uuid
 from pathlib import Path
 from typing import Any, Dict, Optional
-from uuid import UUID, uuid4
 
-from fastapi import APIRouter, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Body, File, HTTPException, Query, UploadFile, status
+from pydantic import BaseModel
+
+from app.services import ingest_state, ingest_worker
+
 
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".mts", ".m2ts"}
+
 DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data")).resolve()
 ORIGINAL_DIR = DATA_ROOT / "original"
-ORIGINAL_DIR.mkdir(parents=True, exist_ok=True)
+MEZZ_DIR = DATA_ROOT / "mezz"
+PROXY_DIR = DATA_ROOT / "proxy"
+THUMBS_DIR = DATA_ROOT / "thumbs"
+META_DIR = DATA_ROOT / "meta"
 
-HEALTH_UPLOAD_ID = "healthcheck"
+for directory in (ORIGINAL_DIR, MEZZ_DIR, PROXY_DIR, THUMBS_DIR, META_DIR):
+    directory.mkdir(parents=True, exist_ok=True)
 
-STAGE_NORMALIZATION = {
-    "ready": "ready",
-    "validate": "validate",
-    "validation": "validate",
-    "validating": "validate",
-    "queued": "validate",
-    "proxy": "make_proxy",
-    "make_proxy": "make_proxy",
-    "mezzanine": "transcode_mezz",
-    "transcode": "transcode_mezz",
-    "transcode_mezz": "transcode_mezz",
-    "thumbs": "thumbs",
-    "thumbnails": "thumbs",
-    "thumbnail": "thumbs",
-    "error": "error",
-}
-
-DEFAULT_STAGE = "ready"
 
 router = APIRouter(prefix="/ingest", tags=["ingest"])
 
-_upload_store: Dict[str, Dict[str, Any]] = {}
+
+class StartIngestRequest(BaseModel):
+    upload_id: str
+
+
+def _build_original_url(upload_id: str, extension: str) -> str:
+    suffix = extension if extension.startswith(".") else f".{extension}"
+    return f"/assets/original/{upload_id}{suffix}"
 
 
 def _empty_assets() -> Dict[str, Optional[str]]:
-    """Return empty asset placeholders for a status payload."""
-
-    return {"original_url": None, "proxy_url": None, "mezzanine_url": None}
-
-
-def _normalize_stage(stage: Optional[str]) -> str:
-    """Normalize a stage name to the supported vocabulary."""
-
-    if not stage:
-        return DEFAULT_STAGE
-    normalized = STAGE_NORMALIZATION.get(stage.lower())
-    return normalized or ("error" if stage else DEFAULT_STAGE)
-
-
-def _clamp_progress(value: int) -> int:
-    """Clamp progress values to a sane 0-100 range."""
-
-    return max(0, min(100, int(value)))
-
-
-def _build_status_payload(
-    status: str,
-    stage: str,
-    progress: int,
-    assets: Dict[str, Optional[str]],
-    message: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Construct a normalized status payload."""
-
-    normalized_assets = {
-        "original_url": assets.get("original_url"),
-        "proxy_url": assets.get("proxy_url"),
-        "mezzanine_url": assets.get("mezzanine_url"),
+    return {
+        "original_url": None,
+        "proxy_url": None,
+        "mezzanine_url": None,
+        "thumbs_glob": None,
+        "keyframes_csv": None,
     }
-    payload: Dict[str, Any] = {
-        "status": status,
-        "stage": _normalize_stage(stage),
-        "progress": _clamp_progress(progress),
-        "assets": normalized_assets,
-    }
-    if message:
-        payload["message"] = message
-    return payload
 
 
-def _clone_payload(payload: Dict[str, Any]) -> Dict[str, Any]:
-    """Return a shallow copy suitable for responses or storage."""
+def _locate_original(upload_id: str) -> Optional[Path]:
+    meta = ingest_state.get_job_meta(upload_id)
+    if meta and meta.get("original_path"):
+        candidate = Path(meta["original_path"])
+        if candidate.exists():
+            return candidate
 
-    cloned = {
-        "status": payload["status"],
-        "stage": payload["stage"],
-        "progress": payload["progress"],
-        "assets": {
-            "original_url": payload["assets"].get("original_url"),
-            "proxy_url": payload["assets"].get("proxy_url"),
-            "mezzanine_url": payload["assets"].get("mezzanine_url"),
-        },
-    }
-    if "message" in payload:
-        cloned["message"] = payload["message"]
-    return cloned
-
-
-def _store_status(
-    upload_id: str,
-    status: str,
-    stage: str,
-    progress: int,
-    assets: Dict[str, Optional[str]],
-    message: Optional[str] = None,
-) -> Dict[str, Any]:
-    """Persist a status payload in memory and return a response copy."""
-
-    payload = _build_status_payload(status, stage, progress, assets, message)
-    _upload_store[upload_id] = _clone_payload(payload)
-    return _clone_payload(payload)
-
-
-def _asset_urls(upload_id: str, extension: Optional[str]) -> Dict[str, Optional[str]]:
-    """Generate asset URLs for a stored upload."""
-
-    if not extension:
-        return _empty_assets()
-    suffix = extension if extension.startswith(".") else f".{extension}"
-    asset_path = f"/assets/original/{upload_id}{suffix}"
-    return {"original_url": asset_path, "proxy_url": asset_path, "mezzanine_url": None}
-
-
-def _locate_existing_extension(upload_id: str) -> Optional[str]:
-    """Look for an on-disk upload and return its extension if present."""
-
-    for extension in sorted(ALLOWED_EXTENSIONS):
+    for extension in ALLOWED_EXTENSIONS:
         candidate = ORIGINAL_DIR / f"{upload_id}{extension}"
         if candidate.exists():
-            return extension
+            return candidate
     return None
 
 
-def _is_uuid_like(value: str) -> bool:
-    """Determine if a value resembles a UUID string."""
-
-    try:
-        UUID(value)
-    except (TypeError, ValueError):
+async def _ensure_worker(upload_id: str, src_path: Path) -> bool:
+    if await ingest_worker.is_job_running(upload_id):
         return False
+
+    task = asyncio.create_task(
+        ingest_worker.run_ingest(upload_id, str(src_path), src_path.suffix.lower())
+    )
+    await ingest_worker.register_task(upload_id, task)
     return True
 
 
-def _ensure_health_seed() -> None:
-    """Ensure a healthcheck job exists in the in-memory store."""
-
-    if HEALTH_UPLOAD_ID not in _upload_store:
-        _store_status(HEALTH_UPLOAD_ID, "ready", "ready", 100, _empty_assets())
-
-
-def _resolve_status(upload_id: str) -> Dict[str, Any]:
-    """Resolve status information for a given upload identifier."""
-
-    if upload_id in _upload_store:
-        return _clone_payload(_upload_store[upload_id])
-
-    extension = _locate_existing_extension(upload_id)
-    if extension:
-        return _store_status(upload_id, "ready", "ready", 100, _asset_urls(upload_id, extension))
-
-    if upload_id == HEALTH_UPLOAD_ID or _is_uuid_like(upload_id):
-        return _build_status_payload("queued", "validate", 0, _empty_assets())
-
-    message = f"Unknown upload_id '{upload_id}'"
-    return _build_status_payload("error", "error", 0, _empty_assets(), message=message)
-
-
-async def _write_file(destination: Path, upload: UploadFile) -> None:
-    """Persist the uploaded file to disk in chunks."""
-
-    try:
-        with destination.open("wb") as buffer:
-            while True:
-                chunk = await upload.read(4 * 1024 * 1024)
-                if not chunk:
-                    break
-                buffer.write(chunk)
-    finally:
-        await upload.close()
-
-
 @router.post("/upload", status_code=status.HTTP_201_CREATED)
-async def upload_video(file: UploadFile = File(...)) -> Dict[str, object]:
-    """Accept a video upload and stash it on disk."""
-
+async def upload_video(file: UploadFile = File(...)) -> Dict[str, Any]:
     if not file.filename:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing filename")
 
@@ -200,43 +85,76 @@ async def upload_video(file: UploadFile = File(...)) -> Dict[str, object]:
             detail="Unsupported file type. Please upload one of: .mp4, .mov, .mkv, .webm, .avi, .mts, .m2ts.",
         )
 
-    upload_id = str(uuid4())
+    upload_id = str(uuid.uuid4())
     destination = ORIGINAL_DIR / f"{upload_id}{extension}"
 
     try:
-        await _write_file(destination, file)
-    except OSError as exc:  # pragma: no cover - guard for filesystem errors
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Unable to save upload") from exc
+        with destination.open("wb") as buffer:
+            while True:
+                chunk = await file.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                buffer.write(chunk)
+    finally:
+        await file.close()
 
-    assets = _asset_urls(upload_id, extension)
-    _store_status(upload_id, "ready", "ready", 100, assets)
+    original_url = _build_original_url(upload_id, extension)
+    ingest_state.create_job(upload_id, str(destination), original_url)
 
     return {
         "upload_id": upload_id,
-        "original_url": assets["original_url"],
-        "proxy_url": assets["proxy_url"],
-        "mezzanine_url": assets["mezzanine_url"],
+        "original_url": original_url,
+        "proxy_url": None,
+        "mezzanine_url": None,
+        "thumbs_glob": None,
+        "keyframes_csv": None,
     }
 
 
-@router.get("/status")
-def get_status(upload_id: str = Query(..., description="Upload identifier")) -> Dict[str, Any]:
-    """Return the status for an upload job."""
+@router.post("/start")
+async def start_ingest(payload: StartIngestRequest = Body(...)) -> Dict[str, str]:
+    upload_id = payload.upload_id
+    job = ingest_state.get_job(upload_id)
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Unknown upload_id")
 
-    _ensure_health_seed()
-    return _resolve_status(upload_id)
+    if job.get("status") == "ready":
+        return {"status": "ready"}
+
+    original_path = _locate_original(upload_id)
+    if not original_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Original file missing")
+
+    started = await _ensure_worker(upload_id, original_path)
+    return {"status": "started" if started else "running"}
+
+
+@router.get("/status")
+async def get_status(upload_id: str = Query(..., description="Upload identifier")) -> Dict[str, Any]:
+    job = ingest_state.get_job(upload_id)
+    if job:
+        return job
+
+    original_path = _locate_original(upload_id)
+    if original_path:
+        original_url = _build_original_url(upload_id, original_path.suffix)
+        assets = _empty_assets()
+        assets.update({"original_url": original_url, "proxy_url": original_url})
+        return {
+            "status": "ready",
+            "stage": "ready",
+            "progress": 100,
+            "assets": assets,
+        }
+
+    return {
+        "status": "queued",
+        "stage": "queued",
+        "progress": 0,
+        "assets": _empty_assets(),
+    }
 
 
 @router.get("/health")
-def get_health(upload_id: Optional[str] = Query(None, description="Optional upload identifier")) -> Dict[str, Any]:
-    """Report ingest module readiness."""
-
-    _ensure_health_seed()
-
-    if upload_id:
-        status_payload = _resolve_status(upload_id)
-        ok = status_payload["status"] != "error"
-    else:
-        ok = any(payload["status"] != "error" for payload in _upload_store.values())
-
-    return {"ok": bool(ok), "module": "ingest"}
+async def get_health() -> Dict[str, Any]:
+    return {"ok": True, "module": "ingest"}

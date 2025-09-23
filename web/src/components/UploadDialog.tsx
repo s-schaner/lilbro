@@ -15,6 +15,7 @@ interface UploadDialogProps {
   onClose: () => void;
   onReady: (payload: UploadResponse) => void;
   onError?: (message: string) => void;
+  onShowLogs?: () => void;
   apiUrl?: string;
 }
 
@@ -36,6 +37,7 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
   onClose,
   onReady,
   onError,
+  onShowLogs,
   apiUrl,
 }) => {
   const [isDragActive, setDragActive] = useState(false);
@@ -45,6 +47,7 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
   const [uploadId, setUploadId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadInfoRef = useRef<UploadResponse | null>(null);
 
   const apiBase = useMemo(() => apiUrl ?? import.meta.env.VITE_API_URL ?? 'http://localhost:8000', [apiUrl]);
 
@@ -56,11 +59,16 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
       setUploadInfo(null);
       setUploadId(null);
       setError(null);
+      uploadInfoRef.current = null;
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
     }
   }, [open]);
+
+  useEffect(() => {
+    uploadInfoRef.current = uploadInfo;
+  }, [uploadInfo]);
 
   const handleUploadError = useCallback(
     (message: string) => {
@@ -99,7 +107,20 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
 
         const payload = (await response.json()) as UploadResponse;
         setUploadInfo(payload);
+        uploadInfoRef.current = payload;
         setUploadId(payload.upload_id);
+        setStatus({
+          status: 'queued',
+          stage: 'queued',
+          progress: 0,
+          assets: {
+            original_url: payload.original_url,
+            proxy_url: payload.proxy_url,
+            mezzanine_url: payload.mezzanine_url,
+            thumbs_glob: payload.thumbs_glob,
+            keyframes_csv: payload.keyframes_csv,
+          },
+        });
       } catch (err) {
         handleUploadError((err as Error).message || 'Upload failed.');
       } finally {
@@ -136,55 +157,59 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
 
   useEffect(() => {
     if (!open || !uploadId) return undefined;
-    let cancelled = false;
-    let timeout: ReturnType<typeof setTimeout> | undefined;
 
-    const poll = async () => {
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async (): Promise<void> => {
+      if (cancelled) return;
       try {
-        const response = await fetch(`${apiBase}/ingest/status?upload_id=${encodeURIComponent(uploadId)}`);
+        const response = await fetch(
+          `${apiBase}/ingest/status?upload_id=${encodeURIComponent(uploadId)}`,
+        );
         if (!response.ok) {
-          throw new Error('Unable to read ingest status');
+          throw new Error('Unable to update ingest status.');
         }
         const payload = (await response.json()) as UploadStatus;
         if (cancelled) return;
         setStatus(payload);
 
+        if (!payload.assets) {
+          handleUploadError('Upload status missing asset metadata.');
+          return;
+        }
+
         if (payload.status === 'error') {
           const message = payload.message ?? 'Upload failed.';
+          setError(message);
           handleUploadError(message);
           return;
         }
 
         if (payload.status === 'ready') {
-          const readyUploadId = uploadInfo?.upload_id ?? uploadId;
-          if (!readyUploadId) {
-            handleUploadError('Upload ready but missing upload identifier.');
-            return;
-          }
+          const assets = payload.assets;
+          const originalUrl =
+            assets.original_url ?? uploadInfoRef.current?.original_url ?? null;
+          const proxyUrl = assets.proxy_url ?? null;
 
-          const assets =
-            payload.assets ??
-            (uploadInfo
-              ? {
-                  original_url: uploadInfo.original_url,
-                  proxy_url: uploadInfo.proxy_url,
-                  mezzanine_url: uploadInfo.mezzanine_url,
-                }
-              : null);
-
-          if (!assets) {
-            handleUploadError('Upload ready but missing asset locations.');
+          if (!originalUrl || !proxyUrl) {
+            const message = 'Upload ready but missing asset locations.';
+            setError(message);
+            handleUploadError(message);
             return;
           }
 
           const readyPayload: UploadResponse = {
-            upload_id: readyUploadId,
-            original_url: assets.original_url,
-            proxy_url: assets.proxy_url,
+            upload_id: uploadId,
+            original_url: originalUrl,
+            proxy_url: proxyUrl,
             mezzanine_url: assets.mezzanine_url ?? null,
+            thumbs_glob: assets.thumbs_glob ?? null,
+            keyframes_csv: assets.keyframes_csv ?? null,
           };
 
           setUploadInfo(readyPayload);
+          uploadInfoRef.current = readyPayload;
           onReady(readyPayload);
           timeout = setTimeout(() => {
             if (!cancelled) {
@@ -195,20 +220,49 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
         }
 
         setError(null);
-        timeout = setTimeout(poll, 1000);
+        timeout = setTimeout(() => {
+          void poll();
+        }, 1000);
       } catch (err) {
         if (cancelled) return;
         handleUploadError((err as Error).message || 'Unable to update ingest status.');
       }
     };
 
-    poll();
+    const startAndPoll = async (): Promise<void> => {
+      try {
+        const response = await fetch(`${apiBase}/ingest/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ upload_id: uploadId }),
+        });
+
+        if (!response.ok) {
+          const detail = await response.json().catch(() => null);
+          const message =
+            (detail && (detail.message || detail.detail)) ||
+            'Unable to start ingest job.';
+          handleUploadError(message);
+          return;
+        }
+
+        setError(null);
+        await poll();
+      } catch (err) {
+        if (cancelled) return;
+        handleUploadError((err as Error).message || 'Unable to start ingest job.');
+      }
+    };
+
+    void startAndPoll();
 
     return () => {
       cancelled = true;
-      if (timeout) clearTimeout(timeout);
+      if (timeout) {
+        clearTimeout(timeout);
+      }
     };
-  }, [apiBase, handleUploadError, onClose, onReady, open, uploadId, uploadInfo]);
+  }, [apiBase, handleUploadError, onClose, onReady, open, uploadId]);
 
   if (!open) {
     return null;
@@ -286,7 +340,21 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
         {error && (
           <div className="mt-4 flex items-start gap-2 rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
             <AlertCircle className="mt-0.5 h-4 w-4 flex-shrink-0" aria-hidden="true" />
-            <span>{error}</span>
+            <div className="flex flex-col gap-2">
+              <span>{error}</span>
+              {onShowLogs && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    onShowLogs();
+                    onClose();
+                  }}
+                  className="self-start rounded-md border border-red-400/40 px-3 py-1 text-xs font-semibold text-red-100 hover:border-red-300/60"
+                >
+                  View Logs
+                </button>
+              )}
+            </div>
           </div>
         )}
       </div>

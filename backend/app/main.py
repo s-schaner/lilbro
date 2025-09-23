@@ -15,8 +15,7 @@ from starlette.responses import Response
 
 from .api import analyze, events, exports, ingest as legacy_ingest, insights, modules, screensnap, stats, trainer
 from .config import get_settings
-from .routers import ingest as ingest_router
-from .routers import logs
+from .routers import ingest, logs
 from .services.logbuffer import LogBuffer
 from .services.loghandler import LogBufferHandler
 
@@ -62,6 +61,7 @@ app.include_router(events.router)
 app.include_router(stats.router)
 app.include_router(analyze.router)
 app.include_router(logs.router)
+app.include_router(ingest.router)
 
 if settings.feature_flags.get("exports", True):
     app.include_router(exports.router)
@@ -70,7 +70,6 @@ if settings.feature_flags.get("trainer", True):
 if settings.feature_flags.get("insights", True):
     app.include_router(insights.router)
 if settings.feature_flags.get("ingest", True):
-    app.include_router(ingest_router.router)
     app.include_router(legacy_ingest.router)
 if settings.feature_flags.get("screen_snap", True):
     app.include_router(screensnap.router)
