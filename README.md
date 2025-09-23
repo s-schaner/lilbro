@@ -14,7 +14,9 @@ docker/         # Runtime Dockerfiles
 ## Getting started
 
 1. Install the dependencies for both the API and the web client (see commands below).
-2. Copy the sample environment file and adjust provider URLs as needed.
+2. Copy the sample environment file and adjust provider URLs as needed. If your frontend needs to proxy to an API host that
+   differs from the browser-facing `VITE_API_URL`, set `VITE_API_PROXY_TARGET` to that backend host (for example, the Docker
+   service name when using `docker-compose`).
 3. Run `docker-compose up --build` to start the stack (API on port 8000, web on port 5173).
 
 The backend exposes mocked routes for analysis, events, stats, exports, trainer proposals, ingest progress, ScreenSnap
