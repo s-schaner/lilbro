@@ -70,8 +70,8 @@ if settings.feature_flags.get("trainer", True):
 if settings.feature_flags.get("insights", True):
     app.include_router(insights.router)
 if settings.feature_flags.get("ingest", True):
-    app.include_router(legacy_ingest.router)
     app.include_router(ingest_router.router)
+    app.include_router(legacy_ingest.router)
 if settings.feature_flags.get("screen_snap", True):
     app.include_router(screensnap.router)
 
