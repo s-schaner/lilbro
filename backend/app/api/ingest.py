@@ -6,7 +6,7 @@ from pydantic import BaseModel
 
 from ..services.ingest import job_store
 
-router = APIRouter()
+router = APIRouter(prefix="/legacy-ingest")
 
 PROGRESS_MAP = {
     "queued": 0.05,
@@ -21,7 +21,7 @@ class IngestRequest(BaseModel):
     source_url: str
 
 
-@router.post("/ingest")
+@router.post("")
 def start_ingest(payload: IngestRequest) -> dict:
     job = job_store.create_job(payload.source_url)
     state = job["state"]
@@ -33,7 +33,7 @@ def start_ingest(payload: IngestRequest) -> dict:
     }
 
 
-@router.get("/ingest/{job_id}")
+@router.get("/{job_id}")
 def get_ingest_status(job_id: str, advance: bool = Query(True)) -> dict:
     try:
         job = job_store.advance_job(job_id) if advance else job_store.peek_job(job_id)

@@ -44,11 +44,15 @@ def test_ingest_health_endpoint_reports_ok():
 def test_legacy_ingest_job_endpoints_remain_accessible():
     client = TestClient(app)
 
-    creation = client.post("/ingest", json={"source_url": "http://example.com/video.mp4"})
+    creation = client.post(
+        "/legacy-ingest", json={"source_url": "http://example.com/video.mp4"}
+    )
     assert creation.status_code == 200
     job_id = creation.json()["job_id"]
 
-    status_response = client.get(f"/ingest/{job_id}", params={"advance": False})
+    status_response = client.get(
+        f"/legacy-ingest/{job_id}", params={"advance": False}
+    )
 
     assert status_response.status_code == 200
     assert status_response.json()["job_id"] == job_id
