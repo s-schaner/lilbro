@@ -58,9 +58,11 @@ for logger_name in ("", "uvicorn", "uvicorn.error", "uvicorn.access", "uvicorn.a
 app.state.log_buffer = log_buffer
 app.state.log_handler = log_handler
 
+cors_allow_origins = settings.allowed_frontend_origins or ["http://localhost:5173"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

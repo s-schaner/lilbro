@@ -16,6 +16,7 @@ services:
       - ENABLE_INSIGHTS=${ENABLE_INSIGHTS:-true}
       - ENABLE_INGEST=${ENABLE_INGEST:-true}
       - ENABLE_EXPORTS=${ENABLE_EXPORTS:-true}
+      - ALLOWED_FRONTEND_ORIGINS=${ALLOWED_FRONTEND_ORIGINS:-http://localhost:5173}
     ports:
       - '8000:8000'
   web:
