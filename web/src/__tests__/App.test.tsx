@@ -25,7 +25,18 @@ type FetchArgs = [input: RequestInfo | URL, init?: RequestInit];
 beforeEach(() => {
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (...args: FetchArgs) => {
     const [input] = args;
-    const url = typeof input === 'string' ? input : input.url;
+    let url: string;
+    if (typeof input === 'string') {
+      url = input;
+    } else if (input instanceof URL) {
+      url = input.toString();
+    } else if (typeof Request !== 'undefined' && input instanceof Request) {
+      url = input.url;
+    } else if (typeof (input as { url?: string }).url === 'string') {
+      url = (input as { url: string }).url;
+    } else {
+      url = String(input);
+    }
     if (url.endsWith('/events')) {
       return new Response(JSON.stringify(eventsPayload), { status: 200 });
     }

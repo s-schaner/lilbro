@@ -1,3 +1,3 @@
 """Additional API routers for VolleySense."""
 
-__all__ = ["ingest", "logs"]
+__all__ = ["annotations", "calibration", "ingest", "logs"]
