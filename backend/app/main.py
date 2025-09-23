@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Callable, Awaitable
 
@@ -16,8 +17,11 @@ from starlette.responses import Response
 from .api import analyze, events, exports, ingest as legacy_ingest, insights, modules, screensnap, stats, trainer
 from .config import get_settings
 from .routers import annotations, calibration, ingest, logs
+from .services import ingest_state
 from .services.logbuffer import LogBuffer
 from .services.loghandler import LogBufferHandler
+
+logger = logging.getLogger(__name__)
 
 random.seed(42)
 
@@ -27,7 +31,15 @@ DATA_ROOT = Path(os.getenv("DATA_ROOT", "/data")).resolve()
 ORIGINAL_DIR = DATA_ROOT / "original"
 ORIGINAL_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title=settings.project_name)
+
+@asynccontextmanager
+async def app_lifespan(_: FastAPI):
+    ingest_state.load_from_disk()
+    logger.info("Ingest state loaded from disk")
+    yield
+
+
+app = FastAPI(title=settings.project_name, lifespan=app_lifespan)
 
 log_buffer = LogBuffer()
 log_handler = LogBufferHandler(log_buffer)
