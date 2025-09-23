@@ -9,6 +9,7 @@ services:
       - data:/data
     environment:
       - DATA_ROOT=/data
+      - USE_GPU=true  # set to false if no NVENC
       - LLM_BASE_URL=${LLM_BASE_URL:-http://localhost:1234/v1}
       - ENABLE_TRAINER=${ENABLE_TRAINER:-true}
       - ENABLE_SCREEN_SNAP=${ENABLE_SCREEN_SNAP:-true}

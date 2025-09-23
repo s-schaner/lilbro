@@ -4,18 +4,18 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.routers import ingest as upload_ingest
 from app.services import ingest as legacy_ingest_service
+from app.services import ingest_state
 
 
 @pytest.fixture(autouse=True)
 def reset_ingest_state():
     """Ensure ingest state stores do not leak between tests."""
 
-    upload_ingest._upload_store.clear()
+    ingest_state.reset_state()
     legacy_ingest_service.job_store._jobs.clear()
     yield
-    upload_ingest._upload_store.clear()
+    ingest_state.reset_state()
     legacy_ingest_service.job_store._jobs.clear()
 
 
@@ -28,7 +28,13 @@ def test_ingest_status_endpoint_returns_payload():
     assert response.status_code == 200
     payload = response.json()
     assert payload["status"]
-    assert set(payload["assets"].keys()) == {"original_url", "proxy_url", "mezzanine_url"}
+    assert set(payload["assets"].keys()) == {
+        "original_url",
+        "proxy_url",
+        "mezzanine_url",
+        "thumbs_glob",
+        "keyframes_csv",
+    }
 
 
 def test_ingest_health_endpoint_reports_ok():

@@ -24,6 +24,7 @@ const AppShell: React.FC = () => {
   const [activeTab, setActiveTab] = useState('players');
   const [showUpload, setShowUpload] = useState(false);
   const [videoSrc, setVideoSrc] = useState<string>();
+  const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; message: string; tone: 'error' | 'success' } | null>(null);
@@ -34,6 +35,9 @@ const AppShell: React.FC = () => {
   const [healthTick, setHealthTick] = useState(0);
   const viewportRef = useRef<VideoViewportHandle>(null);
   const [logFilters, setLogFilters] = useState<LogFilters>({});
+  const mezzanineUrlRef = useRef<string | null>(null);
+  const thumbsGlobRef = useRef<string | null>(null);
+  const keyframesCsvRef = useRef<string | null>(null);
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL ?? 'http://localhost:8000', []);
   const formatStageLabel = useCallback((stage?: string | null) => {
@@ -113,7 +117,21 @@ const AppShell: React.FC = () => {
 
   const handleUploadReady = useCallback(
     (payload: UploadResponse) => {
+      if (!payload.proxy_url) {
+        pushToast('Upload ready but missing proxy asset.', 'error');
+        return;
+      }
+
       setVideoSrc(`${apiBase}${payload.proxy_url}`);
+      const firstThumb = payload.thumbs_glob?.replace('%04d', '0001');
+      if (firstThumb) {
+        setPosterUrl(`${apiBase}${firstThumb}`);
+      } else {
+        setPosterUrl(undefined);
+      }
+      mezzanineUrlRef.current = payload.mezzanine_url;
+      thumbsGlobRef.current = payload.thumbs_glob;
+      keyframesCsvRef.current = payload.keyframes_csv;
       setLastUploadId(payload.upload_id);
       setShowUpload(false);
       pushToast('Upload ready for playback.', 'success');
@@ -127,6 +145,11 @@ const AppShell: React.FC = () => {
     },
     [pushToast],
   );
+
+  const handleViewLogs = useCallback(() => {
+    setLogFilters({ level: 'ERROR', source: 'ingest' });
+    setActiveTab('logs');
+  }, [setLogFilters, setActiveTab]);
 
   const handleCaptureStill = useCallback(() => {
     const dataUrl = viewportRef.current?.captureStill();
@@ -309,7 +332,7 @@ const AppShell: React.FC = () => {
         </div>
         <div className="flex flex-1 flex-col gap-4">
           <section className="relative h-72">
-            <VideoViewport ref={viewportRef} src={videoSrc} />
+            <VideoViewport ref={viewportRef} src={videoSrc} poster={posterUrl} />
             {videoSrc && (
               <div className="absolute right-4 top-4 flex gap-2">
                 <button
@@ -389,6 +412,7 @@ const AppShell: React.FC = () => {
         onClose={() => setShowUpload(false)}
         onReady={handleUploadReady}
         onError={handleUploadError}
+        onShowLogs={handleViewLogs}
         apiUrl={apiBase}
       />
     </div>

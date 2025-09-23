@@ -27,14 +27,18 @@ export interface ModuleHealth {
 export interface UploadResponse {
   upload_id: string;
   original_url: string;
-  proxy_url: string;
+  proxy_url: string | null;
   mezzanine_url: string | null;
+  thumbs_glob: string | null;
+  keyframes_csv: string | null;
 }
 
 export interface UploadStatusAssets {
-  original_url: string;
-  proxy_url: string;
+  original_url: string | null;
+  proxy_url: string | null;
   mezzanine_url: string | null;
+  thumbs_glob: string | null;
+  keyframes_csv: string | null;
 }
 
 export interface UploadStatus {
@@ -42,10 +46,11 @@ export interface UploadStatus {
   stage: string;
   progress: number;
   message?: string;
-  assets?: UploadStatusAssets;
+  assets: UploadStatusAssets;
 }
 
 export const UPLOAD_STAGE_LABELS: Record<string, string> = {
+  queued: 'Queued',
   validate: 'Validating source',
   transcode_mezz: 'Transcoding mezzanine',
   make_proxy: 'Preparing proxy',
