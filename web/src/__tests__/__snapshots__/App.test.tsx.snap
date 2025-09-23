@@ -70,7 +70,7 @@ exports[`renders VolleySense layout snapshot 1`] = `
             class="rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
             type="button"
           >
-            Ingest: ready
+            Ingest: Ready
           </button>
           <button
             class="rounded-md bg-brand px-3 py-2 text-sm font-semibold text-white"

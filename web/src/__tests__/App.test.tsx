@@ -55,6 +55,6 @@ afterEach(() => {
 test('renders VolleySense layout snapshot', async () => {
   const { asFragment } = render(<App />);
   await screen.findByText('VolleySense Console');
-  await screen.findByText('Ingest: ready');
+  await screen.findByText('Ingest: Ready');
   expect(asFragment()).toMatchSnapshot();
 });

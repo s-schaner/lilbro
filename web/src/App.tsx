@@ -13,7 +13,7 @@ import { ModuleHealthList } from './components/ModuleHealthList';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { UploadDialog } from './components/UploadDialog';
 import { VideoViewport, VideoViewportHandle } from './components/VideoViewport';
-import { LogFilters, UploadResponse, UploadStatus } from './data/types';
+import { LogFilters, UploadResponse, UploadStatus, UPLOAD_STAGE_LABELS } from './data/types';
 import LogsTab from './pages/LogsTab';
 
 const AppShell: React.FC = () => {
@@ -36,9 +36,21 @@ const AppShell: React.FC = () => {
   const [logFilters, setLogFilters] = useState<LogFilters>({});
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL ?? 'http://localhost:8000', []);
+  const formatStageLabel = useCallback((stage?: string | null) => {
+    if (!stage) {
+      return 'Ready';
+    }
+    const label = UPLOAD_STAGE_LABELS[stage];
+    if (label) {
+      return label;
+    }
+    const fallback = stage.replace(/_/g, ' ');
+    return fallback.charAt(0).toUpperCase() + fallback.slice(1);
+  }, []);
+
   const healthLabel = useMemo(() => {
     if (ingestHealth === 'online') {
-      return `Ingest: ${ingestStage || 'ready'}`;
+      return `Ingest: ${formatStageLabel(ingestStage)}`;
     }
     if (ingestHealth === 'degraded') {
       return 'Ingest: degraded';
@@ -47,7 +59,7 @@ const AppShell: React.FC = () => {
       return 'Ingest: disabled';
     }
     return 'Ingest: checking…';
-  }, [ingestHealth, ingestStage]);
+  }, [formatStageLabel, ingestHealth, ingestStage]);
 
   const healthTone = useMemo(() => {
     switch (ingestHealth) {

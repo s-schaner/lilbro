@@ -31,11 +31,29 @@ export interface UploadResponse {
   mezzanine_url: string | null;
 }
 
+export interface UploadStatusAssets {
+  original_url: string;
+  proxy_url: string;
+  mezzanine_url: string | null;
+}
+
 export interface UploadStatus {
   status: string;
   stage: string;
   progress: number;
+  message?: string;
+  assets?: UploadStatusAssets;
 }
+
+export const UPLOAD_STAGE_LABELS: Record<string, string> = {
+  validate: 'Validating source',
+  transcode_mezz: 'Transcoding mezzanine',
+  make_proxy: 'Preparing proxy',
+  thumbs: 'Generating thumbnails',
+  ready: 'Ready',
+  error: 'Error',
+  proxy: 'Preparing proxy',
+};
 
 export interface LogEntry {
   ts: string | number;
