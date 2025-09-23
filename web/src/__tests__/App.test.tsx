@@ -13,7 +13,12 @@ const eventsPayload = {
 };
 
 const formationPayload = { formation: { front_row: ['p1'], back_row: ['p2'] } };
-const modulesPayload = { modules: [{ name: 'analysis', status: 'healthy', enabled: true }] };
+const modulesPayload = {
+  modules: [
+    { name: 'analysis', status: 'healthy', enabled: true },
+    { name: 'ingest', status: 'healthy', enabled: true },
+  ],
+};
 
 type FetchArgs = [input: RequestInfo | URL, init?: RequestInit];
 
@@ -30,6 +35,15 @@ beforeEach(() => {
     if (url.endsWith('/modules/health')) {
       return new Response(JSON.stringify(modulesPayload), { status: 200 });
     }
+    if (url.endsWith('/ingest/health')) {
+      return new Response(JSON.stringify({ ok: true, module: 'ingest' }), { status: 200 });
+    }
+    if (url.includes('/ingest/status')) {
+      return new Response(
+        JSON.stringify({ status: 'ready', stage: 'ready', progress: 100 }),
+        { status: 200 },
+      );
+    }
     return new Response('{}', { status: 200 });
   });
 });
@@ -41,5 +55,6 @@ afterEach(() => {
 test('renders VolleySense layout snapshot', async () => {
   const { asFragment } = render(<App />);
   await screen.findByText('VolleySense Console');
+  await screen.findByText('Ingest: ready');
   expect(asFragment()).toMatchSnapshot();
 });

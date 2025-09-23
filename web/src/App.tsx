@@ -27,7 +27,9 @@ const AppShell: React.FC = () => {
   const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; message: string; tone: 'error' | 'success' } | null>(null);
-  const [ingestHealth, setIngestHealth] = useState<'online' | 'offline' | 'loading'>('loading');
+  const [ingestHealth, setIngestHealth] = useState<'online' | 'degraded' | 'loading' | 'disabled'>(
+    'loading',
+  );
   const [ingestStage, setIngestStage] = useState<string>('checking');
   const [healthTick, setHealthTick] = useState(0);
   const viewportRef = useRef<VideoViewportHandle>(null);
@@ -38,11 +40,27 @@ const AppShell: React.FC = () => {
     if (ingestHealth === 'online') {
       return `Ingest: ${ingestStage || 'ready'}`;
     }
-    if (ingestHealth === 'offline') {
-      return 'Ingest: offline';
+    if (ingestHealth === 'degraded') {
+      return 'Ingest: degraded';
+    }
+    if (ingestHealth === 'disabled') {
+      return 'Ingest: disabled';
     }
     return 'Ingest: checking…';
   }, [ingestHealth, ingestStage]);
+
+  const healthTone = useMemo(() => {
+    switch (ingestHealth) {
+      case 'online':
+        return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200';
+      case 'degraded':
+        return 'border-amber-500/40 bg-amber-500/10 text-amber-200';
+      case 'disabled':
+        return 'border-slate-700 bg-slate-900 text-slate-500';
+      default:
+        return 'border-slate-600 bg-slate-800 text-slate-300';
+    }
+  }, [ingestHealth]);
 
   const availableTabs = useMemo(
     () =>
@@ -108,22 +126,78 @@ const AppShell: React.FC = () => {
   }, [pushToast]);
 
   const refreshHealth = useCallback(() => {
-    setIngestHealth('loading');
-    setIngestStage('checking');
+    setIngestHealth((prev) => (prev === 'disabled' ? prev : 'loading'));
+    setIngestStage((prev) => (prev === 'disabled' ? prev : 'checking'));
     setHealthTick((tick) => tick + 1);
   }, []);
 
   useEffect(() => {
+    if (!flags.ingest) {
+      setIngestHealth('disabled');
+      setIngestStage('disabled');
+      return;
+    }
+
+    setIngestHealth((prev) => (prev === 'disabled' ? 'loading' : prev));
+    setIngestStage((prev) => (prev === 'disabled' ? 'checking' : prev));
+
     let cancelled = false;
 
-    const checkHealth = async () => {
-      const targetId = lastUploadId ?? 'healthcheck';
+    const checkIngestHealth = async () => {
+      try {
+        const response = await fetch(`${apiBase}/ingest/health`);
+        if (!response.ok) {
+          throw new Error('Unable to check ingest health');
+        }
+        const payload = await response.json();
+        if (cancelled) return;
+        if (payload.ok) {
+          setIngestHealth('online');
+        } else {
+          setIngestHealth('degraded');
+          setIngestStage('degraded');
+        }
+      } catch (error) {
+        if (cancelled) return;
+        setIngestHealth('degraded');
+        setIngestStage('degraded');
+      }
+    };
+
+    checkIngestHealth();
+    const interval = setInterval(checkIngestHealth, 15000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [apiBase, flags.ingest, healthTick]);
+
+  useEffect(() => {
+    if (!flags.ingest) {
+      return;
+    }
+
+    if (ingestHealth !== 'online') {
+      if (ingestHealth === 'degraded') {
+        setIngestStage('degraded');
+      }
+      return;
+    }
+
+    let cancelled = false;
+    const targetId = lastUploadId ?? 'healthcheck';
+
+    const checkStatus = async () => {
       try {
         const response = await fetch(
           `${apiBase}/ingest/status?upload_id=${encodeURIComponent(targetId)}`,
         );
         if (response.status === 404 && lastUploadId) {
-          setLastUploadId(null);
+          if (!cancelled) {
+            setLastUploadId(null);
+            setIngestStage('ready');
+          }
           return;
         }
         if (!response.ok) {
@@ -131,29 +205,25 @@ const AppShell: React.FC = () => {
         }
         const payload = (await response.json()) as UploadStatus;
         if (cancelled) return;
-        setIngestHealth('online');
-        setIngestStage(payload.stage);
+        setIngestStage(payload.stage ?? 'ready');
+        if (payload.status === 'error') {
+          setIngestHealth('degraded');
+        }
       } catch (error) {
         if (cancelled) return;
-        setIngestHealth('offline');
-        setIngestStage('offline');
+        setIngestHealth('degraded');
+        setIngestStage('degraded');
       }
     };
 
-    checkHealth();
-    const interval = setInterval(checkHealth, 15000);
+    checkStatus();
+    const interval = setInterval(checkStatus, 15000);
 
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [apiBase, healthTick, lastUploadId]);
-
-  useEffect(() => {
-    if (!showUpload) {
-      setIngestHealth((prev) => (prev === 'loading' ? 'online' : prev));
-    }
-  }, [showUpload]);
+  }, [apiBase, flags.ingest, ingestHealth, lastUploadId]);
 
   const triggerExport = async (artifact: string) => {
     if (!flags.exports) {
@@ -195,12 +265,9 @@ const AppShell: React.FC = () => {
             <button
               type="button"
               onClick={refreshHealth}
-              className={`rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand ${
-                ingestHealth === 'online'
-                  ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
-                  : ingestHealth === 'offline'
-                  ? 'border-red-500/50 bg-red-500/10 text-red-200'
-                  : 'border-slate-600 bg-slate-800 text-slate-300'
+              disabled={ingestHealth === 'disabled'}
+              className={`rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand ${healthTone}${
+                ingestHealth === 'disabled' ? ' cursor-not-allowed opacity-60' : ''
               }`}
             >
               {healthLabel}
