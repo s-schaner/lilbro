@@ -181,7 +181,16 @@ const AppShell: React.FC = () => {
           id: 'logs',
           label: 'Logs',
           element: (
-            <LogsTab apiBase={apiBase} filters={logFilters} onFiltersChange={setLogFilters} />
+            <ErrorBoundary
+              label="Logs panel"
+              fallback={
+                <div className="rounded-md border border-slate-800 bg-slate-950/70 p-4 text-sm text-slate-400">
+                  Unable to load logs right now. Please try again later.
+                </div>
+              }
+            >
+              <LogsTab apiBase={apiBase} filters={logFilters} onFiltersChange={setLogFilters} />
+            </ErrorBoundary>
           ),
           enabled: true,
         },
@@ -461,17 +470,27 @@ const AppShell: React.FC = () => {
               videoRef={videoElementRef}
             />
             {videoSrc && (
-              <>
-                <OverlayCanvas
-                  videoRef={videoElementRef}
-                  uploadId={activeUploadId}
-                  annotations={annotations}
-                  calibration={calibration}
-                  mode={tool}
-                  onCreate={saveAnnotation}
-                  pixelToCourt={calibrationHelpers?.pixelToCourt}
-                />
-                <div className="absolute left-4 top-4 flex items-center gap-2">
+              <ErrorBoundary
+                label="Overlay tools"
+                fallback={
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    <div className="rounded-md border border-red-500/40 bg-slate-950/80 px-4 py-3 text-sm text-red-200 shadow-lg backdrop-blur">
+                      Overlay tools failed to load. Try refreshing the page.
+                    </div>
+                  </div>
+                }
+              >
+                <>
+                  <OverlayCanvas
+                    videoRef={videoElementRef}
+                    uploadId={activeUploadId}
+                    annotations={annotations}
+                    calibration={calibration}
+                    mode={tool}
+                    onCreate={saveAnnotation}
+                    pixelToCourt={calibrationHelpers?.pixelToCourt}
+                  />
+                  <div className="absolute left-4 top-4 flex items-center gap-2">
                   {([
                     { id: 'select' as OverlayTool, label: 'Select', icon: <MousePointer2 className="h-4 w-4" />, shortcut: 'V' },
                     { id: 'box' as OverlayTool, label: 'Box', icon: <Square className="h-4 w-4" />, shortcut: 'B' },
@@ -506,15 +525,16 @@ const AppShell: React.FC = () => {
                   >
                     <Ruler className="h-3.5 w-3.5" /> Calibrate
                   </button>
-                  <button
-                    type="button"
-                    onClick={handleCaptureStill}
-                    className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand"
-                  >
-                    <Camera className="h-3.5 w-3.5" /> Capture still
-                  </button>
-                </div>
-              </>
+                    <button
+                      type="button"
+                      onClick={handleCaptureStill}
+                      className="inline-flex items-center gap-2 rounded-md border border-slate-600 bg-slate-900/80 px-3 py-1 text-xs text-slate-200 backdrop-blur focus:outline-none focus:ring-2 focus:ring-brand"
+                    >
+                      <Camera className="h-3.5 w-3.5" /> Capture still
+                    </button>
+                  </div>
+                </>
+              </ErrorBoundary>
             )}
           </section>
           <section className="module-card">
