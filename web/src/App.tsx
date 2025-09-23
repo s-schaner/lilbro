@@ -13,7 +13,8 @@ import { ModuleHealthList } from './components/ModuleHealthList';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { UploadDialog } from './components/UploadDialog';
 import { VideoViewport, VideoViewportHandle } from './components/VideoViewport';
-import { UploadResponse, UploadStatus } from './data/types';
+import { LogFilters, UploadResponse, UploadStatus } from './data/types';
+import LogsTab from './pages/LogsTab';
 
 const AppShell: React.FC = () => {
   const { players, events, formation, loading } = useVolleyData();
@@ -30,6 +31,7 @@ const AppShell: React.FC = () => {
   const [ingestStage, setIngestStage] = useState<string>('checking');
   const [healthTick, setHealthTick] = useState(0);
   const viewportRef = useRef<VideoViewportHandle>(null);
+  const [logFilters, setLogFilters] = useState<LogFilters>({});
 
   const apiBase = useMemo(() => import.meta.env.VITE_API_URL ?? 'http://localhost:8000', []);
   const healthLabel = useMemo(() => {
@@ -43,13 +45,22 @@ const AppShell: React.FC = () => {
   }, [ingestHealth, ingestStage]);
 
   const availableTabs = useMemo(
-    () => [
-      { id: 'players', label: 'Players', element: <PlayersPanel players={players} />, enabled: true },
-      { id: 'events', label: 'Events', element: <EventsPanel events={events} />, enabled: true },
-      { id: 'formation', label: 'Formation', element: <FormationPanel formation={formation} />, enabled: true },
-      { id: 'insights', label: 'Insights', element: <InsightsPanel />, enabled: flags.insights },
-    ].filter((tab) => tab.enabled),
-    [players, events, formation, flags.insights],
+    () =>
+      [
+        { id: 'players', label: 'Players', element: <PlayersPanel players={players} />, enabled: true },
+        { id: 'events', label: 'Events', element: <EventsPanel events={events} />, enabled: true },
+        { id: 'formation', label: 'Formation', element: <FormationPanel formation={formation} />, enabled: true },
+        { id: 'insights', label: 'Insights', element: <InsightsPanel />, enabled: flags.insights },
+        {
+          id: 'logs',
+          label: 'Logs',
+          element: (
+            <LogsTab apiBase={apiBase} filters={logFilters} onFiltersChange={setLogFilters} />
+          ),
+          enabled: true,
+        },
+      ].filter((tab) => tab.enabled),
+    [players, events, formation, flags.insights, apiBase, logFilters],
   );
 
   useEffect(() => {
@@ -104,7 +115,6 @@ const AppShell: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | undefined;
 
     const checkHealth = async () => {
       const targetId = lastUploadId ?? 'healthcheck';
@@ -131,11 +141,11 @@ const AppShell: React.FC = () => {
     };
 
     checkHealth();
-    interval = setInterval(checkHealth, 15000);
+    const interval = setInterval(checkHealth, 15000);
 
     return () => {
       cancelled = true;
-      if (interval) clearInterval(interval);
+      clearInterval(interval);
     };
   }, [apiBase, healthTick, lastUploadId]);
 
