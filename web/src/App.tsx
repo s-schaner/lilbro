@@ -13,13 +13,11 @@ import { ModuleHealthList } from './components/ModuleHealthList';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { UploadDialog } from './components/UploadDialog';
 import { VideoViewport, VideoViewportHandle } from './components/VideoViewport';
-import {
-  OverlayCanvas,
-  AnnotationRecord,
-  AnnotationInput,
-  CalibrationData,
-} from './components/OverlayCanvas';
-import { LogFilters, UploadResponse, UploadStatus, UPLOAD_STAGE_LABELS } from './data/types';
+import { OverlayCanvas, AnnotationInput, CalibrationData } from './components/OverlayCanvas';
+import { LogFilters, UPLOAD_STAGE_LABELS } from './data/types';
+import { useIngestStore } from './store/ingestStore';
+import { useOverlayStore } from './store/overlayStore';
+import { useHealthStore } from './store/healthStore';
 import LogsTab from './pages/LogsTab';
 import { CalibrationWizard } from './pages/CalibrationWizard';
 import { useOverlayTool, OverlayTool } from './hooks/useOverlayTool';
@@ -50,28 +48,76 @@ const AppShell: React.FC = () => {
   const [showUpload, setShowUpload] = useState(false);
   const [videoSrc, setVideoSrc] = useState<string>();
   const [posterUrl, setPosterUrl] = useState<string | undefined>(undefined);
-  const [lastUploadId, setLastUploadId] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
   const [toast, setToast] = useState<{ id: number; message: string; tone: 'error' | 'success' } | null>(null);
-  const [ingestHealth, setIngestHealth] = useState<'online' | 'degraded' | 'loading' | 'disabled'>(
-    'loading',
-  );
-  const [ingestStage, setIngestStage] = useState<string>('checking');
-  const [healthTick, setHealthTick] = useState(0);
   const viewportRef = useRef<VideoViewportHandle>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const [logFilters, setLogFilters] = useState<LogFilters>({});
   const mezzanineUrlRef = useRef<string | null>(null);
   const thumbsGlobRef = useRef<string | null>(null);
   const keyframesCsvRef = useRef<string | null>(null);
-  const [annotations, setAnnotations] = useState<AnnotationRecord[]>([]);
-  const [calibration, setCalibration] = useState<CalibrationData | null>(null);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
   const [hoverPreview, setHoverPreview] = useState<{ time: number; left: number; url: string; timeLabel: string } | null>(
     null,
   );
   const timelineRef = useRef<HTMLDivElement>(null);
   const { tool, setTool } = useOverlayTool();
+  const previousIngestStatusRef = useRef<string | null>(null);
+  const lastIngestErrorRef = useRef<string | null>(null);
+  const lastOverlayErrorRef = useRef<string | null>(null);
+  const {
+    upload,
+    uploadId,
+    status: ingestStatus,
+    error: ingestError,
+    poll: pollIngest,
+    reset: resetIngest,
+  } = useIngestStore((state) => ({
+    upload: state.upload,
+    uploadId: state.uploadId,
+    status: state.status,
+    error: state.error,
+    poll: state.poll,
+    reset: state.reset,
+  }));
+  const {
+    ingestStatus: healthStatus,
+    poll: pollHealth,
+    refresh: refreshHealthAction,
+    disable: disableHealth,
+    reset: resetHealth,
+  } = useHealthStore((state) => ({
+    ingestStatus: state.ingestStatus,
+    poll: state.poll,
+    refresh: state.refresh,
+    disable: state.disable,
+    reset: state.reset,
+  }));
+  const {
+    activeUploadId,
+    annotations,
+    calibration,
+    loadOverlay,
+    setActiveUpload,
+    saveAnnotation: saveAnnotationToStore,
+    setCalibration: setCalibrationData,
+    error: overlayError,
+  } = useOverlayStore((state) => ({
+    activeUploadId: state.activeUploadId,
+    annotations:
+      state.activeUploadId && state.annotationsByUpload[state.activeUploadId]
+        ? state.annotationsByUpload[state.activeUploadId]
+        : [],
+    calibration:
+      state.activeUploadId !== null
+        ? state.calibrationByUpload[state.activeUploadId] ?? null
+        : null,
+    loadOverlay: state.load,
+    setActiveUpload: state.setActiveUpload,
+    saveAnnotation: state.saveAnnotation,
+    setCalibration: state.setCalibration,
+    error: state.error,
+  }));
   const calibrationHelpers = useMemo(() => {
     if (!calibration) return null;
     return {
@@ -93,21 +139,26 @@ const AppShell: React.FC = () => {
     return fallback.charAt(0).toUpperCase() + fallback.slice(1);
   }, []);
 
+  const stageLabel = useMemo(
+    () => formatStageLabel(ingestStatus?.stage ?? null),
+    [formatStageLabel, ingestStatus],
+  );
+
   const healthLabel = useMemo(() => {
-    if (ingestHealth === 'online') {
-      return `Ingest: ${formatStageLabel(ingestStage)}`;
+    if (healthStatus === 'online') {
+      return `Ingest: ${stageLabel}`;
     }
-    if (ingestHealth === 'degraded') {
+    if (healthStatus === 'degraded') {
       return 'Ingest: degraded';
     }
-    if (ingestHealth === 'disabled') {
+    if (healthStatus === 'disabled') {
       return 'Ingest: disabled';
     }
     return 'Ingest: checking…';
-  }, [formatStageLabel, ingestHealth, ingestStage]);
+  }, [healthStatus, stageLabel]);
 
   const healthTone = useMemo(() => {
-    switch (ingestHealth) {
+    switch (healthStatus) {
       case 'online':
         return 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200';
       case 'degraded':
@@ -117,7 +168,7 @@ const AppShell: React.FC = () => {
       default:
         return 'border-slate-600 bg-slate-800 text-slate-300';
     }
-  }, [ingestHealth]);
+  }, [healthStatus]);
 
   const availableTabs = useMemo(
     () =>
@@ -171,72 +222,26 @@ const AppShell: React.FC = () => {
     setToast({ id: Date.now(), message, tone });
   }, []);
 
-  const fetchAnnotations = useCallback(
-    async (uploadId: string) => {
-      try {
-        const response = await fetch(`${apiBase}/annotations/${uploadId}`);
-        if (!response.ok) {
-          throw new Error('Failed to load annotations');
-        }
-        const payload = (await response.json()) as AnnotationRecord[];
-        setAnnotations(payload);
-      } catch (error) {
-        console.error('Annotation fetch failed', error);
-        setAnnotations([]);
-      }
-    },
-    [apiBase],
-  );
-
-  const fetchCalibration = useCallback(
-    async (uploadId: string) => {
-      try {
-        const response = await fetch(`${apiBase}/calibration/${uploadId}`);
-        if (response.status === 404) {
-          setCalibration(null);
-          return;
-        }
-        if (!response.ok) {
-          throw new Error('Failed to load calibration');
-        }
-        const payload = (await response.json()) as CalibrationData;
-        setCalibration(payload);
-      } catch (error) {
-        console.error('Calibration fetch failed', error);
-        setCalibration(null);
-      }
-    },
-    [apiBase],
-  );
-
   const saveAnnotation = useCallback(
     async (payload: AnnotationInput) => {
-      if (!lastUploadId) {
+      if (!activeUploadId) {
         throw new Error('Upload required before adding annotations.');
       }
-      const response = await fetch(`${apiBase}/annotations/${lastUploadId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(detail || 'Unable to save annotation');
-      }
-      const record = (await response.json()) as AnnotationRecord;
-      setAnnotations((prev) => [...prev, record]);
+      const record = await saveAnnotationToStore(activeUploadId, payload, apiBase);
       pushToast('Annotation saved.', 'success');
       return record;
     },
-    [apiBase, lastUploadId, pushToast],
+    [activeUploadId, apiBase, pushToast, saveAnnotationToStore],
   );
 
   const handleCalibrationSaved = useCallback(
     (payload: CalibrationData) => {
-      setCalibration(payload);
+      if (activeUploadId) {
+        setCalibrationData(activeUploadId, payload);
+      }
       pushToast('Calibration saved.', 'success');
     },
-    [pushToast],
+    [activeUploadId, pushToast, setCalibrationData],
   );
 
   useEffect(() => {
@@ -245,49 +250,61 @@ const AppShell: React.FC = () => {
     return () => clearTimeout(timeout);
   }, [toast]);
 
-  const handleUploadReady = useCallback(
-    (payload: UploadResponse) => {
-      if (!payload.proxy_url) {
-        pushToast('Upload ready but missing proxy asset.', 'error');
-        return;
-      }
+  useEffect(() => {
+    if (ingestError && ingestError !== lastIngestErrorRef.current) {
+      pushToast(ingestError, 'error');
+      lastIngestErrorRef.current = ingestError;
+    }
+    if (!ingestError) {
+      lastIngestErrorRef.current = null;
+    }
+  }, [ingestError, pushToast]);
 
-      setVideoSrc(`${apiBase}${payload.proxy_url}`);
-      const firstThumb = payload.thumbs_glob?.replace('%04d', '0001');
+  useEffect(() => {
+    if (overlayError && overlayError !== lastOverlayErrorRef.current) {
+      pushToast(overlayError, 'error');
+      lastOverlayErrorRef.current = overlayError;
+    }
+    if (!overlayError) {
+      lastOverlayErrorRef.current = null;
+    }
+  }, [overlayError, pushToast]);
+
+  useEffect(() => {
+    const current = ingestStatus?.status ?? null;
+    if (current === 'ready' && previousIngestStatusRef.current !== 'ready' && upload?.proxy_url) {
+      setVideoSrc(`${apiBase}${upload.proxy_url}`);
+      const firstThumb = upload.thumbs_glob?.replace('%04d', '0001');
       if (firstThumb) {
         setPosterUrl(`${apiBase}${firstThumb}`);
       } else {
         setPosterUrl(undefined);
       }
-      mezzanineUrlRef.current = payload.mezzanine_url;
-      thumbsGlobRef.current = payload.thumbs_glob;
-      keyframesCsvRef.current = payload.keyframes_csv;
-      setLastUploadId(payload.upload_id);
+      mezzanineUrlRef.current = upload.mezzanine_url;
+      thumbsGlobRef.current = upload.thumbs_glob;
+      keyframesCsvRef.current = upload.keyframes_csv;
       setShowUpload(false);
-      setAnnotations([]);
-      setCalibration(null);
       setHoverPreview(null);
       pushToast('Upload ready for playback.', 'success');
-    },
-    [apiBase, pushToast],
-  );
-
-  const handleUploadError = useCallback(
-    (message: string) => {
-      pushToast(message, 'error');
-    },
-    [pushToast],
-  );
+      setActiveUpload(upload.upload_id);
+    }
+    previousIngestStatusRef.current = current;
+  }, [
+    apiBase,
+    ingestStatus,
+    pushToast,
+    setActiveUpload,
+    setHoverPreview,
+    setShowUpload,
+    upload,
+  ]);
 
   useEffect(() => {
-    if (!lastUploadId) {
-      setAnnotations([]);
-      setCalibration(null);
+    if (!activeUploadId) {
       return;
     }
-    fetchAnnotations(lastUploadId).catch(() => {});
-    fetchCalibration(lastUploadId).catch(() => {});
-  }, [fetchAnnotations, fetchCalibration, lastUploadId]);
+    void loadOverlay(activeUploadId, apiBase);
+  }, [activeUploadId, apiBase, loadOverlay]);
 
   const handleViewLogs = useCallback(() => {
     setLogFilters({ level: 'ERROR', source: 'ingest' });
@@ -328,105 +345,42 @@ const AppShell: React.FC = () => {
     setHoverPreview(null);
   }, []);
 
-  const refreshHealth = useCallback(() => {
-    setIngestHealth((prev) => (prev === 'disabled' ? prev : 'loading'));
-    setIngestStage((prev) => (prev === 'disabled' ? prev : 'checking'));
-    setHealthTick((tick) => tick + 1);
-  }, []);
+  const handleRefreshHealth = useCallback(() => {
+    if (!flags.ingest) {
+      disableHealth();
+      return;
+    }
+    refreshHealthAction(apiBase, true).catch((error) => {
+      console.error('Unable to refresh ingest health', error);
+    });
+  }, [apiBase, disableHealth, flags.ingest, refreshHealthAction]);
 
   useEffect(() => {
     if (!flags.ingest) {
-      setIngestHealth('disabled');
-      setIngestStage('disabled');
+      disableHealth();
+      resetIngest();
       return;
     }
 
-    setIngestHealth((prev) => (prev === 'disabled' ? 'loading' : prev));
-    setIngestStage((prev) => (prev === 'disabled' ? 'checking' : prev));
-
-    let cancelled = false;
-
-    const checkIngestHealth = async () => {
-      try {
-        const response = await fetch(`${apiBase}/ingest/health`);
-        if (!response.ok) {
-          throw new Error('Unable to check ingest health');
-        }
-        const payload = await response.json();
-        if (cancelled) return;
-        if (payload.ok) {
-          setIngestHealth('online');
-        } else {
-          setIngestHealth('degraded');
-          setIngestStage('degraded');
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setIngestHealth('degraded');
-        setIngestStage('degraded');
-      }
-    };
-
-    checkIngestHealth();
-    const interval = setInterval(checkIngestHealth, 15000);
+    pollHealth(apiBase, true).catch((error) => {
+      console.error('Unable to start ingest health polling', error);
+    });
 
     return () => {
-      cancelled = true;
-      clearInterval(interval);
+      resetHealth();
+      resetIngest();
     };
-  }, [apiBase, flags.ingest, healthTick]);
+  }, [apiBase, disableHealth, flags.ingest, pollHealth, resetHealth, resetIngest]);
 
   useEffect(() => {
     if (!flags.ingest) {
       return;
     }
-
-    if (ingestHealth !== 'online') {
-      if (ingestHealth === 'degraded') {
-        setIngestStage('degraded');
-      }
+    if (healthStatus !== 'online') {
       return;
     }
-
-    let cancelled = false;
-    const targetId = lastUploadId ?? 'healthcheck';
-
-    const checkStatus = async () => {
-      try {
-        const response = await fetch(
-          `${apiBase}/ingest/status?upload_id=${encodeURIComponent(targetId)}`,
-        );
-        if (response.status === 404 && lastUploadId) {
-          if (!cancelled) {
-            setLastUploadId(null);
-            setIngestStage('ready');
-          }
-          return;
-        }
-        if (!response.ok) {
-          throw new Error('Status unavailable');
-        }
-        const payload = (await response.json()) as UploadStatus;
-        if (cancelled) return;
-        setIngestStage(payload.stage ?? 'ready');
-        if (payload.status === 'error') {
-          setIngestHealth('degraded');
-        }
-      } catch (error) {
-        if (cancelled) return;
-        setIngestHealth('degraded');
-        setIngestStage('degraded');
-      }
-    };
-
-    checkStatus();
-    const interval = setInterval(checkStatus, 15000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [apiBase, flags.ingest, ingestHealth, lastUploadId]);
+    void pollIngest(apiBase, uploadId ?? 'healthcheck');
+  }, [apiBase, flags.ingest, healthStatus, pollIngest, uploadId]);
 
   const triggerExport = async (artifact: string) => {
     if (!flags.exports) {
@@ -467,10 +421,10 @@ const AppShell: React.FC = () => {
             <Layers className="h-4 w-4" /> Modules online: {modules.length}
             <button
               type="button"
-              onClick={refreshHealth}
-              disabled={ingestHealth === 'disabled'}
+              onClick={handleRefreshHealth}
+              disabled={healthStatus === 'disabled'}
               className={`rounded-full border px-3 py-1 text-xs font-medium transition focus:outline-none focus:ring-2 focus:ring-brand ${healthTone}${
-                ingestHealth === 'disabled' ? ' cursor-not-allowed opacity-60' : ''
+                healthStatus === 'disabled' ? ' cursor-not-allowed opacity-60' : ''
               }`}
             >
               {healthLabel}
@@ -510,7 +464,7 @@ const AppShell: React.FC = () => {
               <>
                 <OverlayCanvas
                   videoRef={videoElementRef}
-                  uploadId={lastUploadId}
+                  uploadId={activeUploadId}
                   annotations={annotations}
                   calibration={calibration}
                   mode={tool}
@@ -650,8 +604,6 @@ const AppShell: React.FC = () => {
       <UploadDialog
         open={showUpload}
         onClose={() => setShowUpload(false)}
-        onReady={handleUploadReady}
-        onError={handleUploadError}
         onShowLogs={handleViewLogs}
         apiUrl={apiBase}
       />
@@ -659,7 +611,7 @@ const AppShell: React.FC = () => {
         open={calibrationOpen}
         onClose={() => setCalibrationOpen(false)}
         videoRef={videoElementRef}
-        uploadId={lastUploadId ?? undefined}
+        uploadId={activeUploadId ?? undefined}
         apiBase={apiBase}
         onSaved={handleCalibrationSaved}
       />
