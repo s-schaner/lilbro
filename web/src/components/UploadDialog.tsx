@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import { AlertCircle, CheckCircle2, Loader2, UploadCloud } from 'lucide-react';
 
-import { UploadResponse, UploadStatus } from '../data/types';
+import { UploadResponse, UploadStatus, UPLOAD_STAGE_LABELS } from '../data/types';
 
 interface UploadDialogProps {
   open: boolean;
@@ -19,10 +19,16 @@ interface UploadDialogProps {
 }
 
 const ACCEPTED_TYPES = '.mp4,.mov,.mkv,.webm,.avi,.mts,.m2ts';
-const STAGE_LABELS: Record<string, string> = {
-  validate: 'Validating source',
-  proxy: 'Preparing proxy',
-  ready: 'Ready',
+const formatStageLabel = (stage?: string | null) => {
+  if (!stage) {
+    return 'Waiting for upload';
+  }
+  const label = UPLOAD_STAGE_LABELS[stage];
+  if (label) {
+    return label;
+  }
+  const fallback = stage.replace(/_/g, ' ');
+  return fallback.charAt(0).toUpperCase() + fallback.slice(1);
 };
 
 export const UploadDialog: React.FC<UploadDialogProps> = ({
@@ -143,10 +149,43 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
         if (cancelled) return;
         setStatus(payload);
 
+        if (payload.status === 'error') {
+          const message = payload.message ?? 'Upload failed.';
+          handleUploadError(message);
+          return;
+        }
+
         if (payload.status === 'ready') {
-          if (uploadInfo) {
-            onReady(uploadInfo);
+          const readyUploadId = uploadInfo?.upload_id ?? uploadId;
+          if (!readyUploadId) {
+            handleUploadError('Upload ready but missing upload identifier.');
+            return;
           }
+
+          const assets =
+            payload.assets ??
+            (uploadInfo
+              ? {
+                  original_url: uploadInfo.original_url,
+                  proxy_url: uploadInfo.proxy_url,
+                  mezzanine_url: uploadInfo.mezzanine_url,
+                }
+              : null);
+
+          if (!assets) {
+            handleUploadError('Upload ready but missing asset locations.');
+            return;
+          }
+
+          const readyPayload: UploadResponse = {
+            upload_id: readyUploadId,
+            original_url: assets.original_url,
+            proxy_url: assets.proxy_url,
+            mezzanine_url: assets.mezzanine_url ?? null,
+          };
+
+          setUploadInfo(readyPayload);
+          onReady(readyPayload);
           timeout = setTimeout(() => {
             if (!cancelled) {
               onClose();
@@ -155,6 +194,7 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
           return;
         }
 
+        setError(null);
         timeout = setTimeout(poll, 1000);
       } catch (err) {
         if (cancelled) return;
@@ -174,8 +214,8 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
     return null;
   }
 
-  const stageLabel = status?.stage ? STAGE_LABELS[status.stage] ?? status.stage : 'Waiting for upload';
-  const progressPercent = status ? Math.min(100, status.progress) : 0;
+  const stageLabel = formatStageLabel(status?.stage ?? null);
+  const progressPercent = status ? Math.min(100, Math.max(0, status.progress)) : 0;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 px-4 py-8" role="dialog" aria-modal="true">
@@ -218,15 +258,22 @@ export const UploadDialog: React.FC<UploadDialogProps> = ({
           />
         </div>
         <div className="mt-4 space-y-2 text-sm text-slate-300">
-          <div className="flex items-center gap-2">
-            {status?.status === 'ready' ? (
-              <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
-            ) : isSubmitting || status ? (
-              <Loader2 className="h-4 w-4 animate-spin text-brand" aria-hidden="true" />
-            ) : (
-              <UploadCloud className="h-4 w-4 text-slate-400" aria-hidden="true" />
+          <div className="flex flex-col gap-1">
+            <div className="flex items-center gap-2">
+              {status?.status === 'ready' ? (
+                <CheckCircle2 className="h-4 w-4 text-emerald-400" aria-hidden="true" />
+              ) : status?.status === 'error' ? (
+                <AlertCircle className="h-4 w-4 text-red-400" aria-hidden="true" />
+              ) : isSubmitting || status ? (
+                <Loader2 className="h-4 w-4 animate-spin text-brand" aria-hidden="true" />
+              ) : (
+                <UploadCloud className="h-4 w-4 text-slate-400" aria-hidden="true" />
+              )}
+              <span>{stageLabel}</span>
+            </div>
+            {status?.message && (
+              <div className="ml-6 text-xs text-slate-400">{status.message}</div>
             )}
-            <span>{stageLabel}</span>
           </div>
           <div className="h-2 rounded-full bg-slate-800">
             <div
