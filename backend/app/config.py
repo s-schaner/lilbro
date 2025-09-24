@@ -1,11 +1,14 @@
 """Application configuration and feature flag management."""
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from typing import Dict, List
 
 from pydantic import Field, field_validator
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings.sources import PydanticBaseSettingsSource
 
 
 class Settings(BaseSettings):
@@ -40,7 +43,54 @@ class Settings(BaseSettings):
             "allowed_frontend_origins must be provided as a list, tuple, set, or comma-separated string"
         )
 
-    model_config = SettingsConfigDict(env_prefix="", case_sensitive=False)
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        case_sensitive=False,
+    )
+
+    @staticmethod
+    def _lenient_decode_complex_value(
+        _source: PydanticBaseSettingsSource,
+        field_name: str,
+        field: FieldInfo,
+        value: object,
+    ) -> object:
+        """Decode complex values while tolerating plain strings.
+
+        The default :mod:`pydantic-settings` behaviour assumes complex values
+        are encoded as JSON. Deployments often configure
+        ``ALLOWED_FRONTEND_ORIGINS`` as a simple comma separated string (or leave
+        it blank). In those cases ``json.loads`` raises ``JSONDecodeError`` and
+        prevents the API from starting. We fall back to the original string and
+        let the field validator normalise the value.
+        """
+
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return ""
+            try:
+                return json.loads(stripped)
+            except json.JSONDecodeError:
+                return value
+        try:
+            return json.loads(value)  # type: ignore[arg-type]
+        except (TypeError, json.JSONDecodeError):
+            return value
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls,
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        env_settings.decode_complex_value = cls._lenient_decode_complex_value.__get__(
+            env_settings, env_settings.__class__
+        )
+        return init_settings, env_settings, dotenv_settings, file_secret_settings
 
     @property
     def feature_flags(self) -> Dict[str, bool]:
