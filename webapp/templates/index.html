@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="grid grid-cols-1 xl:grid-cols-3 gap-6">
+  <!-- Analyze form -->
+  <section class="xl:col-span-2 card bg-base-100 shadow">
+    <div class="card-body">
+      <h2 class="card-title">Analyze Clip</h2>
+      <form id="analyze-form"
+            hx-post="/_api/analyze"
+            hx-encoding="multipart/form-data"
+            hx-target="#results"
+            hx-swap="innerHTML"
+            onsubmit="showToast('Analyzing...', 'info')">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div class="form-control">
+            <label class="label"><span class="label-text">Video</span></label>
+            <input type="file" name="video" class="file-input file-input-bordered w-full" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">HF Endpoint</span></label>
+            <input name="endpoint" class="input input-bordered w-full"
+                   value="https://xw3xbts6l8qsa6x9.us-east-2.aws.endpoints.huggingface.cloud" required />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Token</span></label>
+            <input type="password" name="token" class="input input-bordered w-full" />
+          </div>
+          <div class="form-control">
+            <label class="label"><span class="label-text">Model</span></label>
+            <input name="model" class="input input-bordered w-full" value="Qwen/Qwen2.5-VL-32B-Instruct" />
+          </div>
+        </div>
+
+        <div class="form-control mt-2">
+          <label class="label"><span class="label-text">Prompt</span></label>
+          <textarea name="prompt" rows="3" class="textarea textarea-bordered">
+Describe rally; output STRICT JSON with:
+{"rally_state": "...", "who_won": "teamA|teamB|null", "reason":"...", "timeline":[{"t": 12.3, "event":"attack", "actor":"teamA#12"}]}
+          </textarea>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-6 gap-2 mt-2">
+          <label class="input input-bordered flex items-center gap-2">fps
+            <input name="fps" type="number" value="3" class="grow text-right" />
+          </label>
+          <label class="input input-bordered flex items-center gap-2">max_frames
+            <input name="max_frames" type="number" value="48" class="grow text-right" />
+          </label>
+          <label class="input input-bordered flex items-center gap-2">max_pixels
+            <input name="max_pixels" type="number" value="1048576" class="grow text-right" />
+          </label>
+          <label class="input input-bordered flex items-center gap-2">max_tokens
+            <input name="max_tokens" type="number" value="256" class="grow text-right" />
+          </label>
+          <label class="input input-bordered flex items-center gap-2">temperature
+            <input name="temperature" type="number" step="0.1" value="0.2" class="grow text-right" />
+          </label>
+        </div>
+
+        <div class="card-actions justify-end mt-4">
+          <button class="btn btn-primary">
+            <span class="hx-indicator loading loading-spinner loading-sm mr-2"></span>
+            Analyze
+          </button>
+        </div>
+      </form>
+    </div>
+  </section>
+
+  <!-- Results panel -->
+  <section id="results" class="card bg-base-100 shadow xl:col-span-1">
+    <div class="card-body">
+      <h2 class="card-title">Results</h2>
+      <p class="text-sm opacity-70">Your analysis will appear here.</p>
+    </div>
+  </section>
+</div>
+
+{% endblock %}
